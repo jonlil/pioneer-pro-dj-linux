@@ -88,7 +88,7 @@ mod tests {
 pub struct Player {
     pub model: String,
     pub address: SocketAddr,
-    pub number: String,
+    pub number: u8,
 }
 
 // impl Player {

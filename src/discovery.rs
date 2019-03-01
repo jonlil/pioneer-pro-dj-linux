@@ -64,7 +64,7 @@ fn parse_udp_package(
         PlayerEvent::Annoncement(Player {
             address: source,
             model: str::from_utf8(&data[12..19]).unwrap().to_owned(),
-            number: str::from_utf8(&data[37..38]).unwrap().to_owned(),
+            number: data[36].to_owned(),
         })
     } else {
         PlayerEvent::Error(String::from("I have no clue"))
