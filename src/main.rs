@@ -2,20 +2,48 @@ mod discovery;
 mod player;
 
 use std::net::{UdpSocket};
-use discovery::{PlayerDiscovery};
-use player::PlayerIter;
+use player::{PlayerCollection};
+use discovery::*;
+use std::{thread, time};
 
+
+struct Application {
+    players: PlayerCollection,
+}
+
+impl Application {
+    fn new() -> Self {
+        Self {
+            players: PlayerCollection::new(),
+        }
+    }
+}
 
 fn main() -> std::io::Result<()> {
     {
-        let mut socket = UdpSocket::bind("0.0.0.0:50000")?;
-        let mut players = PlayerIter::new();
+        let handler = thread::spawn(|| {
+            let mut index: u8 = 0;
+            let ten_millis = time::Duration::from_millis(1000);
+            loop {
+                eprintln!("#{:?}", index);
+                thread::sleep(ten_millis);
+                if index == 255 {
+                    index = 0;
+                }
+                index += 1;
+            }
+        });
 
         // Create an Application struct
-        // Thread for PlayerDiscovery
-        PlayerDiscovery::run(&mut socket, &mut players);
+        let mut application = Application::new();
 
-        eprintln!("#{:?}", players);
+        // Thread for PlayerDiscovery
+        discovery::run(&mut application.players, discovery::Options {
+            listen_address: String::from("0.0.0.0:50000"),
+        });
+        handler.join().unwrap();
+
+        //eprintln!("#{:?}", player_discovery.players);
 
         // Thread for UI (rendering)
         // Thread for communication with "connected players"

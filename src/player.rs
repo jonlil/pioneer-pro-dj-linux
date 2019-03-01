@@ -84,10 +84,11 @@ mod tests {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Player {
     pub model: String,
     pub address: SocketAddr,
+    pub number: String,
 }
 
 // impl Player {
@@ -103,14 +104,20 @@ impl PartialEq for Player {
 }
 
 #[derive(Debug)]
-pub struct PlayerIter {
+pub struct PlayerCollection {
     players: Vec<Player>,
 }
 
-impl PlayerIter {
-    pub fn new() -> PlayerIter {
-        PlayerIter {
+impl PlayerCollection {
+    pub fn new() -> Self {
+        Self {
             players: Vec::new(),
+        }
+    }
+
+    pub fn iter(&mut self) -> PlayerIter {
+        PlayerIter {
+            players: self.players.to_vec()
         }
     }
 
@@ -130,6 +137,11 @@ impl PlayerIter {
             },
         }
     }
+}
+
+#[derive(Debug)]
+pub struct PlayerIter {
+    players: Vec<Player>,
 }
 
 impl Iterator for PlayerIter {

@@ -1,38 +1,51 @@
 use std::net::{UdpSocket, SocketAddr};
-use crate::player::{Player, PlayerIter};
+use crate::player::{Player, PlayerCollection};
 use std::str;
+use std::thread;
 
 mod test {}
 
-pub struct PlayerDiscovery {}
 
-impl PlayerDiscovery {
-    pub fn run(
-        socket: &mut UdpSocket,
-        players: &mut PlayerIter
-    ) -> std::io::Result<()> {
-        eprintln!("Running discovery");
+pub struct Options {
+    pub listen_address: String,
+}
 
-        loop {
-            // Set buffer size, larger packages will be discarded.
-            let mut buf = [0; 100];
+impl Options {
+    fn listen_address(&self) -> String {
+        self.listen_address.to_owned()
+    }
+}
 
-            // Read from network
-            let (number_of_bytes, src) = socket.recv_from(&mut buf)?;
+pub fn run(
+    players: &PlayerCollection,
+    options: Options
+) -> std::io::Result<()> {
+    // bind socket in thread
+    let socket = UdpSocket::bind(options.listen_address())?;
 
-            // reassign buffer with read bytes
-            let buf = &mut buf[..number_of_bytes];
-            match parse_udp_package(number_of_bytes, src, &buf) {
-                PlayerEvent::Annoncement(player) => {
-                    players.add_or_update(player);
-                },
-                _ => {}
-            }
+    eprintln!("Running discovery");
 
-            eprintln!("#{:?}", players);
+    let discovery_handler = thread::spawn(move || loop {
+        match recv_from(&socket) {
+            PlayerEvent::Annoncement(player) => {
+                eprintln!("#{:?}", player);
+            },
+            _ => {}
         }
+    });
 
-        Ok(())
+    discovery_handler.join().expect("Discovery handler thread has paniced!");
+
+    Ok(())
+}
+
+fn recv_from(socket: &UdpSocket) -> PlayerEvent {
+    let mut buffer = [0u8; 512];
+    match socket.recv_from(&mut buffer) {
+        Ok((number_of_bytes, source)) => {
+            parse_udp_package(number_of_bytes, source, &buffer[..number_of_bytes])
+        },
+        Err(error) => PlayerEvent::Error(error.to_string()),
     }
 }
 
@@ -50,7 +63,8 @@ fn parse_udp_package(
     if size == 54 {
         PlayerEvent::Annoncement(Player {
             address: source,
-            model: str::from_utf8(&data[12..19]).unwrap().to_owned()
+            model: str::from_utf8(&data[12..19]).unwrap().to_owned(),
+            number: str::from_utf8(&data[37..38]).unwrap().to_owned(),
         })
     } else {
         PlayerEvent::Error(String::from("I have no clue"))
