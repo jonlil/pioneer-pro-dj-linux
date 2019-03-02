@@ -2,6 +2,8 @@ use std::net::{UdpSocket, SocketAddr};
 use crate::player::{Player, PlayerCollection};
 use std::str;
 use std::thread;
+use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc;
 
 mod test {}
 
@@ -16,23 +18,28 @@ impl Options {
     }
 }
 
+#[allow(dead_code)]
 pub fn run(
     players: &PlayerCollection,
     options: Options
 ) -> std::io::Result<()> {
-    // bind socket in thread
     let socket = UdpSocket::bind(options.listen_address())?;
-
+    let (tx, rx): (Sender<PlayerEvent>, Receiver<PlayerEvent>) = mpsc::channel();
     eprintln!("Running discovery");
 
+    let discovery_tx = tx.clone();
     let discovery_handler = thread::spawn(move || loop {
-        match recv_from(&socket) {
+        discovery_tx.send(recv_from(&socket)).unwrap();
+    });
+
+    loop {
+        match rx.recv().unwrap() {
             PlayerEvent::Annoncement(player) => {
                 eprintln!("#{:?}", player);
             },
             _ => {}
         }
-    });
+    }
 
     discovery_handler.join().expect("Discovery handler thread has paniced!");
 
@@ -55,6 +62,7 @@ enum PlayerEvent {
     Error(String),
 }
 
+#[allow(dead_code)]
 fn parse_udp_package(
     size: usize,
     source: SocketAddr,

@@ -12,6 +12,7 @@ mod tests {
         let player = Player {
             model: "XDJ-700".to_string(),
             address: socket,
+            number: 1u8,
         };
 
         assert_eq!(player.model, "XDJ-700".to_string());
@@ -21,7 +22,7 @@ mod tests {
 
     #[test]
     fn it_can_find_player() {
-        let mut players = PlayerIter::new();
+        let mut players = PlayerCollection::new();
 
         let playerA = Player {
             model: "XDJ-700".to_string(),
