@@ -23,7 +23,6 @@ pub fn run(
     players: &PlayerCollection,
     options: Options
 ) -> std::io::Result<()> {
-    // bind socket in thread
     let socket = UdpSocket::bind(options.listen_address())?;
     let (tx, rx): (Sender<PlayerEvent>, Receiver<PlayerEvent>) = mpsc::channel();
     eprintln!("Running discovery");
