@@ -57,7 +57,10 @@ fn main() -> Result<(), failure::Error> {
             {
                 let events = app.players.iter().map(|player| {
                     Text::styled(
-                        format!("{}: {}", player.number, player.model),
+                        format!("{}: {} ({})",
+                            player.number,
+                            player.model,
+                            player.address.ip()),
                         Style::default().fg(Color::White)
                     )
                 });
