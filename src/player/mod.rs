@@ -1,17 +1,31 @@
-use std::net::{SocketAddr};
+use std::net::{SocketAddr, IpAddr, UdpSocket};
 
 #[derive(Debug, Clone)]
 pub struct Player {
     pub model: String,
     pub address: SocketAddr,
     pub number: u8,
+    pub linked: bool,
 }
 
-// impl Player {
-//     pub fn verify(&self) -> Result<(), Error> {
-//        Err()
-//     }
-// }
+impl Player {
+    pub fn ip(&self) -> IpAddr {
+        return self.address.ip()
+    }
+
+    pub fn link(&mut self) {
+        let mut socket = UdpSocket::bind("0.0.0.0:50002").expect("Could not bind player communication port");
+        let buffer = [0u8; 296];
+        match socket.send_to(&buffer, format!("{}:50002", self.ip())) {
+            Ok(number_of_bytes) => {
+                eprintln!("#{:?}", number_of_bytes);
+            },
+            Err(error) => {
+                eprintln!("#{:?}", error);
+            }
+        };
+    }
+}
 
 impl PartialEq for Player {
     fn eq(&self, other: &Player) -> bool {
@@ -53,6 +67,12 @@ impl PlayerCollection {
             None => {
                 self.push(player);
             },
+        }
+    }
+
+    pub fn link(&mut self) {
+        for player in self.players.iter_mut() {
+            player.link();
         }
     }
 }

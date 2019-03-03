@@ -60,7 +60,7 @@ fn main() -> Result<(), failure::Error> {
                         format!("{}: {} ({})",
                             player.number,
                             player.model,
-                            player.address.ip()),
+                            player.ip()),
                         Style::default().fg(Color::White)
                     )
                 });
@@ -76,6 +76,9 @@ fn main() -> Result<(), failure::Error> {
             Event::Input(input) => {
                 if input == Key::Char('q') {
                     break;
+                }
+                if input == Key::Char('c') {
+                    app.players.link();
                 }
             }
             Event::Tick => {

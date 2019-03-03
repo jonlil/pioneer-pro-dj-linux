@@ -49,6 +49,7 @@ impl DiscoveryListener {
                 address: metadata.1,
                 model: str::from_utf8(&buffer[12..19]).unwrap().to_owned(),
                 number: buffer[36].to_owned(),
+                linked: false,
             })
         } else {
             Event::Error(String::from("Unable to parse discovery package."))
