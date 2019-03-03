@@ -9,9 +9,9 @@ use termion::input::MouseTerminal;
 use termion::raw::IntoRawMode;
 use termion::screen::AlternateScreen;
 use tui::backend::TermionBackend;
-use tui::layout::{Constraint, Direction, Layout};
-use tui::style::{Color, Modifier, Style};
-use tui::widgets::{Block, Borders, Gauge, Widget};
+use tui::layout::{Constraint, Direction, Layout, Corner};
+use tui::style::{Color, Style};
+use tui::widgets::{Block, Borders, Widget, List, Text};
 use tui::Terminal;
 
 use crate::util::event::{Event, Events};
@@ -52,18 +52,23 @@ fn main() -> Result<(), failure::Error> {
     loop {
         terminal.draw(|mut f| {
             let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(2)
-                .constraints(
-                    [
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                    ]
-                    .as_ref(),
-                )
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
                 .split(f.size());
+
+            {
+                let events = app.players.iter().map(|player| {
+                    Text::styled(
+                        format!("{}: {}", player.number, player.model),
+                        Style::default().fg(Color::White)
+                    )
+                });
+
+                List::new(events)
+                    .block(Block::default().borders(Borders::ALL).title("List"))
+                    .start_corner(Corner::BottomLeft)
+                    .render(&mut f, chunks[1]);
+            }
         })?;
 
         match events.next()? {
