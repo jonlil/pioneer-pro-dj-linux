@@ -42,13 +42,15 @@ impl PlayerCollection {
         self.players.push(player);
     }
 
-    pub fn get(&self, address: &SocketAddr) -> Option<&Player> {
-        self.players.iter().find(|&p| p.address == *address)
+    pub fn get_mut(&mut self, address: &SocketAddr) -> Option<&mut Player> {
+        self.players.iter_mut().find(|p| p.address == *address)
     }
 
     pub fn add_or_update(&mut self, player: Player) {
-        match self.get(&player.address) {
-            Some(_) => {},
+        match self.get_mut(&player.address) {
+            Some(mut p) => {
+                p.number = player.number;
+            },
             None => {
                 self.push(player);
             },
