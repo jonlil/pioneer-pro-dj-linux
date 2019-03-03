@@ -1,5 +1,4 @@
 use std::net::{SocketAddr};
-use std::error::{Error};
 
 #[derive(Debug, Clone)]
 pub struct Player {
