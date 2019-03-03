@@ -1,52 +1,89 @@
 mod discovery;
+mod util;
 mod player;
 
-use std::net::{UdpSocket};
-use player::{PlayerCollection};
-use discovery::*;
-use std::{thread, time};
+use std::io;
 
+use termion::event::Key;
+use termion::input::MouseTerminal;
+use termion::raw::IntoRawMode;
+use termion::screen::AlternateScreen;
+use tui::backend::TermionBackend;
+use tui::layout::{Constraint, Direction, Layout};
+use tui::style::{Color, Modifier, Style};
+use tui::widgets::{Block, Borders, Gauge, Widget};
+use tui::Terminal;
 
-struct Application {
+use crate::util::event::{Event, Events};
+use crate::discovery::event::{
+    Events as DiscoveryEvents,
+    Event as DiscoveryEvent,
+};
+use crate::player::{PlayerCollection};
+
+struct App {
     players: PlayerCollection,
 }
 
-impl Application {
+impl App {
     fn new() -> Self {
         Self {
             players: PlayerCollection::new(),
         }
     }
+
+    fn update(&mut self) {  }
 }
 
-fn main() -> std::io::Result<()> {
-    {
-        let handler = thread::spawn(|| {
-            let mut index: u8 = 0;
-            let ten_millis = time::Duration::from_millis(1000);
-            loop {
-                eprintln!("#{:?}", index);
-                thread::sleep(ten_millis);
-                if index == 255 {
-                    index = 0;
+fn main() -> Result<(), failure::Error> {
+    // Terminal initialization
+    let stdout = io::stdout().into_raw_mode()?;
+    let stdout = MouseTerminal::from(stdout);
+    let stdout = AlternateScreen::from(stdout);
+    let backend = TermionBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.hide_cursor()?;
+
+    let events = Events::new();
+    let discovery_events = DiscoveryEvents::new();
+
+    let mut app = App::new();
+
+    loop {
+        terminal.draw(|mut f| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(2)
+                .constraints(
+                    [
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                    ]
+                    .as_ref(),
+                )
+                .split(f.size());
+        })?;
+
+        match events.next()? {
+            Event::Input(input) => {
+                if input == Key::Char('q') {
+                    break;
                 }
-                index += 1;
             }
-        });
+            Event::Tick => {
+                app.update();
+            }
+        };
 
-        // Create an Application struct
-        let mut application = Application::new();
+        match discovery_events.next()? {
+            DiscoveryEvent::Annoncement(player) => {
+                app.players.add_or_update(player);
+            },
+            DiscoveryEvent::Error(_) => (),
+        };
+    }
 
-        // Thread for PlayerDiscovery
-        discovery::run(&mut application.players, discovery::Options {
-            listen_address: String::from("0.0.0.0:50000"),
-        });
-        handler.join().unwrap();
-
-        //eprintln!("#{:?}", player_discovery.players);
-
-        // Thread for UI (rendering)
-        // Thread for communication with "connected players"
-    } // the socket is closed here
     Ok(())
 }
