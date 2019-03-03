@@ -16,7 +16,6 @@ use tui::Terminal;
 
 use crate::util::event::{Event, Events};
 use crate::discovery::event::{
-    Events as DiscoveryEvents,
     Event as DiscoveryEvent,
 };
 use crate::player::{PlayerCollection};
@@ -45,7 +44,6 @@ fn main() -> Result<(), failure::Error> {
     terminal.hide_cursor()?;
 
     let events = Events::new();
-    let discovery_events = DiscoveryEvents::new();
 
     let mut app = App::new();
 
@@ -59,7 +57,10 @@ fn main() -> Result<(), failure::Error> {
             {
                 let events = app.players.iter().map(|player| {
                     Text::styled(
-                        format!("{}: {}", player.number, player.model),
+                        format!("{}: {} ({})",
+                            player.number,
+                            player.model,
+                            player.address.ip()),
                         Style::default().fg(Color::White)
                     )
                 });
@@ -79,14 +80,13 @@ fn main() -> Result<(), failure::Error> {
             }
             Event::Tick => {
                 app.update();
-            }
-        };
-
-        match discovery_events.next()? {
-            DiscoveryEvent::Annoncement(player) => {
-                app.players.add_or_update(player);
             },
-            DiscoveryEvent::Error(_) => (),
+            Event::Discovery(evnt) => {
+                match evnt {
+                    DiscoveryEvent::Annoncement(player) => app.players.add_or_update(player),
+                    _ => (),
+                }
+            }
         };
     }
 

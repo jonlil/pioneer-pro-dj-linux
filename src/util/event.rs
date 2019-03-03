@@ -6,17 +6,22 @@ use std::time::Duration;
 use termion::event::Key;
 use termion::input::TermRead;
 
-pub enum Event<I> {
-    Input(I),
+use crate::discovery::listener::{DiscoveryListener};
+use crate::discovery::event::{Event as DiscoveryEvent};
+
+pub enum Event {
+    Input(Key),
     Tick,
+    Discovery(DiscoveryEvent),
 }
 
 /// A small event handler that wrap termion input and tick events. Each event
 /// type is handled in its own thread and returned to a common `Receiver`
 pub struct Events {
-    rx: mpsc::Receiver<Event<Key>>,
+    rx: mpsc::Receiver<Event>,
     input_handle: thread::JoinHandle<()>,
     tick_handle: thread::JoinHandle<()>,
+    player_discovery_channel: thread::JoinHandle<()>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -70,14 +75,27 @@ impl Events {
                 }
             })
         };
+        let player_discovery_channel = {
+            let discover_listener = DiscoveryListener::new();
+            let tx = tx.clone();
+            thread::spawn(move || loop {
+                match discover_listener.receive() {
+                    DiscoveryEvent::Annoncement(player) => {
+                        tx.send(Event::Discovery(DiscoveryEvent::Annoncement(player))).unwrap();
+                    },
+                    _ => (),
+                }
+            })
+        };
         Events {
             rx,
             input_handle,
             tick_handle,
+            player_discovery_channel,
         }
     }
 
-    pub fn next(&self) -> Result<Event<Key>, mpsc::RecvError> {
+    pub fn next(&self) -> Result<Event, mpsc::RecvError> {
         self.rx.recv()
     }
 }
