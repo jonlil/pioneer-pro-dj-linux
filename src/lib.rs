@@ -1,2 +1,0 @@
-mod player;
-mod discovery;

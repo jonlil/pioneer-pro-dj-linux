@@ -5,3 +5,9 @@ authors = ["Jonas Liljestrand <jonas.liljestrand@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+termion = "1.5.1"
+rand = "0.6"
+failure = "0.1.5"
+
+[dependencies.tui]
+version = "0.4.0"
