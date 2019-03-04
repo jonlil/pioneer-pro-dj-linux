@@ -13,6 +13,7 @@ use tui::layout::{Constraint, Direction, Layout, Corner};
 use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders, Widget, List, Text};
 use tui::Terminal;
+use std::net::UdpSocket;
 
 use crate::util::event::{Event, Events};
 use crate::discovery::event::{
@@ -46,6 +47,7 @@ fn main() -> Result<(), failure::Error> {
     let events = Events::new();
 
     let mut app = App::new();
+    let mut link_socket = UdpSocket::bind("0.0.0.0:50002").expect("Could not bind player communication port");;
 
     loop {
         terminal.draw(|mut f| {
@@ -78,7 +80,7 @@ fn main() -> Result<(), failure::Error> {
                     break;
                 }
                 if input == Key::Char('c') {
-                    app.players.link();
+                    app.players.link(&mut link_socket);
                 }
             }
             Event::Tick => {

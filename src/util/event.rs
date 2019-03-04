@@ -98,4 +98,6 @@ impl Events {
     pub fn next(&self) -> Result<Event, mpsc::RecvError> {
         self.rx.recv()
     }
+
+    pub fn send(&self) {}
 }
