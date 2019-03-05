@@ -52,7 +52,7 @@ impl DiscoveryListener {
                 linked: false,
             })
         } else {
-            Event::Error(String::from("Unable to parse discovery package."))
+            Event::Error(String::from_utf8(buffer.to_vec()).unwrap())
         }
     }
 }

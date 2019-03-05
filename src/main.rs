@@ -14,6 +14,8 @@ use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders, Widget, List, Text};
 use tui::Terminal;
 use std::net::UdpSocket;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::util::event::{Event, Events};
 use crate::discovery::event::{
@@ -23,12 +25,14 @@ use crate::player::{PlayerCollection};
 
 struct App {
     players: PlayerCollection,
+    messages: Vec<String>,
 }
 
 impl App {
     fn new() -> Self {
         Self {
             players: PlayerCollection::new(),
+            messages: Vec::new(),
         }
     }
 
@@ -44,10 +48,12 @@ fn main() -> Result<(), failure::Error> {
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
 
+    let link_socket = Arc::new(Mutex::new(
+        UdpSocket::bind("0.0.0.0:50002").unwrap()
+    ));
     let events = Events::new();
-
     let mut app = App::new();
-    let mut link_socket = UdpSocket::bind("0.0.0.0:50002").expect("Could not bind player communication port");;
+    let mut linking: bool = false;
 
     loop {
         terminal.draw(|mut f| {
@@ -72,6 +78,18 @@ fn main() -> Result<(), failure::Error> {
                     .start_corner(Corner::BottomLeft)
                     .render(&mut f, chunks[1]);
             }
+
+            {
+                let events = app.messages.iter().map(|message| {
+                    Text::styled(format!("{}", message), Style::default().fg(Color::White)
+                    )
+                });
+
+                List::new(events)
+                    .block(Block::default().borders(Borders::ALL).title("List"))
+                    .start_corner(Corner::BottomLeft)
+                    .render(&mut f, chunks[0]);
+            }
         })?;
 
         match events.next()? {
@@ -79,8 +97,15 @@ fn main() -> Result<(), failure::Error> {
                 if input == Key::Char('q') {
                     break;
                 }
+
                 if input == Key::Char('c') {
-                    app.players.link(&mut link_socket);
+                    // TODO: Figure out how to store a reference to
+                    // the thread (so we can stop the network flood).
+                    if linking == false {
+                        linking = true;
+                        app.messages.push(String::from("Linking players"));
+                        events.create_link_channel(&link_socket);
+                    }
                 }
             }
             Event::Tick => {
@@ -92,7 +117,12 @@ fn main() -> Result<(), failure::Error> {
                     _ => (),
                 }
             }
+            Event::Message(string) => {
+                app.messages.push(string);
+            }
         };
+
+
     }
 
     Ok(())

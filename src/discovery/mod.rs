@@ -18,8 +18,6 @@ impl Options {
     }
 }
 
-
-
 pub enum PlayerEvent {
     Annoncement(Player),
     Disconnect(Player),

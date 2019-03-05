@@ -2,26 +2,31 @@ use std::io;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
+use std::net::{UdpSocket, IpAddr};
+use std::sync::{Arc, Mutex};
 
 use termion::event::Key;
 use termion::input::TermRead;
 
 use crate::discovery::listener::{DiscoveryListener};
 use crate::discovery::event::{Event as DiscoveryEvent};
+use crate::player::{PlayerCollection, Player};
 
 pub enum Event {
     Input(Key),
     Tick,
     Discovery(DiscoveryEvent),
+    Message(String),
 }
 
 /// A small event handler that wrap termion input and tick events. Each event
 /// type is handled in its own thread and returned to a common `Receiver`
 pub struct Events {
     rx: mpsc::Receiver<Event>,
+    tx: mpsc::Sender<Event>,
     input_handle: thread::JoinHandle<()>,
     tick_handle: thread::JoinHandle<()>,
-    player_discovery_channel: thread::JoinHandle<()>,
+    player_discovery_handle: thread::JoinHandle<()>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,7 +80,7 @@ impl Events {
                 }
             })
         };
-        let player_discovery_channel = {
+        let player_discovery_handle = {
             let discover_listener = DiscoveryListener::new();
             let tx = tx.clone();
             thread::spawn(move || loop {
@@ -83,15 +88,16 @@ impl Events {
                     DiscoveryEvent::Annoncement(player) => {
                         tx.send(Event::Discovery(DiscoveryEvent::Annoncement(player))).unwrap();
                     },
-                    _ => (),
+                    DiscoveryEvent::Error(message) => tx.send(Event::Message(message)).unwrap()
                 }
             })
         };
         Events {
             rx,
+            tx,
             input_handle,
             tick_handle,
-            player_discovery_channel,
+            player_discovery_handle,
         }
     }
 
@@ -99,5 +105,21 @@ impl Events {
         self.rx.recv()
     }
 
-    pub fn send(&self) {}
+    pub fn create_link_channel(
+        &self,
+        socket: &Arc<Mutex<UdpSocket>>
+    ) -> thread::JoinHandle<()> {
+        {
+            let socket_ref = socket.clone();
+            let tx = self.tx.clone();
+            thread::spawn(move || loop {
+                let socket = socket_ref.lock().unwrap();
+                match Player::link(&socket) {
+                    Ok(nob) => tx.send(Event::Message(nob.to_string())).unwrap(),
+                    Err(error) => tx.send(Event::Message(error.to_string())).unwrap()
+                };
+                thread::sleep(Duration::from_millis(300));
+            })
+        }
+    }
 }
