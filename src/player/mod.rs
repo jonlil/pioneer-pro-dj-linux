@@ -14,8 +14,9 @@ impl Player {
         return self.address.ip()
     }
 
-    pub fn link(mut socket: &UdpSocket) -> io::Result<usize> {
-        socket.set_broadcast(true);
+    pub fn link(socket: &UdpSocket) -> io::Result<usize> {
+        socket.set_broadcast(true).expect("set_broadcast call failed");
+
         // This should be sent to broadcast
         let buffer = [
             0x51,0x73,0x70,0x74,0x31,0x57,

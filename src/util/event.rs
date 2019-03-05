@@ -113,8 +113,8 @@ impl Events {
             let socket_ref = socket.clone();
             let tx = self.tx.clone();
             thread::spawn(move || loop {
-                let mut socket = socket_ref.lock().unwrap();
-                match Player::link(&mut socket) {
+                let socket = socket_ref.lock().unwrap();
+                match Player::link(&socket) {
                     Ok(nob) => tx.send(Event::Message(nob.to_string())).unwrap(),
                     Err(error) => tx.send(Event::Message(error.to_string())).unwrap()
                 };
