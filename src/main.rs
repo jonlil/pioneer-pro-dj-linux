@@ -194,6 +194,10 @@ impl Message {
     }
 }
 
+pub enum RekordboxMessage {
+    Player(Player),
+}
+
 pub struct RekordboxEventHandler;
 impl RekordboxEventHandler {
     pub fn is_rekordbox_event(data: &[u8]) -> bool {
@@ -208,7 +212,7 @@ impl RekordboxEventHandler {
         }
     }
 
-    pub fn get_type(buffer: &[u8]) -> RekordboxEvent {
+    fn get_type(buffer: &[u8]) -> RekordboxEvent {
         if !Self::is_rekordbox_event(&buffer) {
             return RekordboxEvent::Unknown
         }
@@ -216,7 +220,15 @@ impl RekordboxEventHandler {
         let number_of_bytes = buffer.len();
         if number_of_bytes == 54 && &buffer[10..=11] == &[0x06, 0x00] {
             if &buffer[32..=34] == &[0x01, 0x02, 0x00] {
-                return RekordboxEvent::PlayerBroadcast
+                let model_name = str::from_utf8(&buffer[12..=31])
+                    .unwrap()
+                    .trim_end_matches('\u{0}');
+
+                return RekordboxEvent::PlayerBroadcast {
+                    model: model_name.to_string(),
+                    number: buffer[36],
+                    token: RekordboxToken::new(buffer[44], buffer[45], buffer[46]),
+                }
             } else if &buffer[32..=34] == &[0x01, 0x03, 0x00] {
                 return RekordboxEvent::ApplicationBroadcast
             }
@@ -224,30 +236,60 @@ impl RekordboxEventHandler {
 
         RekordboxEvent::Unknown
     }
-}
 
-#[derive(Debug, PartialEq)]
-pub struct Player {
-    model: String,
-    //physical_address: &'a[u8; 6],
-    address: SocketAddr,
-    number: u8,
-    //token: &'a[u8; 3],
-}
-
-impl Player {
-    pub fn from(address: SocketAddr, buffer: &[u8]) -> Self {
-        Player {
-            address: address,
-            model: str::from_utf8(&buffer[12..=32]).unwrap().to_owned(),
-            number: buffer[32].to_owned()
+    pub fn parse(buffer: &[u8], metadata: (usize, SocketAddr)) -> Option<RekordboxMessage> {
+        match Self::get_type(buffer) {
+            RekordboxEvent::PlayerBroadcast { model, number, token } => {
+                Some(RekordboxMessage::Player(
+                    Player::new(model, number, token, metadata.1)
+                ))
+            },
+            RekordboxEvent::ApplicationBroadcast => None,
+            RekordboxEvent::Error => None,
+            RekordboxEvent::Unknown => None,
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Player {
+    model: String,
+    address: SocketAddr,
+    number: u8,
+    token: RekordboxToken,
+}
+
+impl Player {
+    pub fn new(
+        model: String,
+        number: u8,
+        token: RekordboxToken,
+        address: SocketAddr
+    ) -> Self {
+        Self { model: model, number: number, token: token, address: address }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RekordboxToken {
+    a: u8,
+    b: u8,
+    c: u8,
+}
+
+impl RekordboxToken {
+    pub fn new(a: u8, b: u8, c: u8) -> Self {
+        Self { a: a, b: b, c: c }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum RekordboxEvent {
-    PlayerBroadcast,
+    PlayerBroadcast {
+        model: String,
+        number: u8,
+        token: RekordboxToken,
+    },
     ApplicationBroadcast,
     Unknown,
     Error,
@@ -258,11 +300,11 @@ mod tests {
     use crate::{
         RekordboxEventHandler,
         RekordboxEvent,
+        RekordboxToken,
         SOFTWARE_IDENTIFICATION,
         APPLICATION_NAME,
-        Player,
     };
-    use std::net::{SocketAddr};
+    use std::str;
 
     #[test]
     fn it_should_identify_rekordbox_in_network() {
@@ -292,13 +334,11 @@ mod tests {
             0x00
         ]);
         assert_eq!(payload.as_slice().len(), 54);
-        assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::PlayerBroadcast);
-
-        //Player {
-        //    model: String::from("XDJ-700"),
-        //    address: SocketAddr::from(([192, 168, 10, 53], 50000)),
-        //    number: 0x01
-        //}
+        assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::PlayerBroadcast {
+            model: str::from_utf8(&APPLICATION_NAME[..]).unwrap().trim_end_matches('\u{0}').to_string(),
+            number: 0x03,
+            token: RekordboxToken::new(0xa9, 0xfe, 0x1e),
+        });
     }
 
     // This method is more or less added for documentation purpose.
