@@ -2,10 +2,11 @@ extern crate rand;
 
 use std::thread;
 use std::sync::{Arc, Mutex};
-use std::net::{UdpSocket, ToSocketAddrs};
+use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
 use std::io;
 use std::time::{Duration};
 use rand::Rng;
+use std::str;
 
 const SOFTWARE_IDENTIFICATION: [u8; 10] = [
     0x51,0x73,0x70,0x74,0x31,0x57,0x6d,0x4a,0x4f,0x4c
@@ -208,23 +209,48 @@ impl RekordboxEventHandler {
     }
 
     pub fn get_type(buffer: &[u8]) -> RekordboxEvent {
-        RekordboxEvent::Broadcast
+        if !Self::is_rekordbox_event(&buffer) {
+            return RekordboxEvent::Unknown
+        }
+
+        let number_of_bytes = buffer.len();
+        if number_of_bytes == 54 && &buffer[10..=11] == &[0x06, 0x00] {
+            if &buffer[32..=34] == &[0x01, 0x02, 0x00] {
+                return RekordboxEvent::PlayerBroadcast
+            } else if &buffer[32..=34] == &[0x01, 0x03, 0x00] {
+                return RekordboxEvent::ApplicationBroadcast
+            }
+        }
+
+        RekordboxEvent::Unknown
     }
+}
 
-    pub fn parse(buffer: &[u8]) {
-        Self::parse_raw_event(buffer);
-    }
+#[derive(Debug, PartialEq)]
+pub struct Player {
+    model: String,
+    //physical_address: &'a[u8; 6],
+    address: SocketAddr,
+    number: u8,
+    //token: &'a[u8; 3],
+}
 
-    fn parse_raw_event(buffer: &[u8]) -> Result<(), &'static str> {
-        if !Self::is_rekordbox_event(&buffer) {}
-
-        Ok(())
+impl Player {
+    pub fn from(address: SocketAddr, buffer: &[u8]) -> Self {
+        Player {
+            address: address,
+            model: str::from_utf8(&buffer[12..=32]).unwrap().to_owned(),
+            number: buffer[32].to_owned()
+        }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum RekordboxEvent {
-    Broadcast
+    PlayerBroadcast,
+    ApplicationBroadcast,
+    Unknown,
+    Error,
 }
 
 #[cfg(test)]
@@ -232,8 +258,11 @@ mod tests {
     use crate::{
         RekordboxEventHandler,
         RekordboxEvent,
-        SOFTWARE_IDENTIFICATION
+        SOFTWARE_IDENTIFICATION,
+        APPLICATION_NAME,
+        Player,
     };
+    use std::net::{SocketAddr};
 
     #[test]
     fn it_should_identify_rekordbox_in_network() {
@@ -241,7 +270,52 @@ mod tests {
         assert_eq!(RekordboxEventHandler::is_rekordbox_event(&SOFTWARE_IDENTIFICATION), true);
     }
 
-    fn it_should_extract_type_from_package() {
-        assert_eq!(RekordboxEventHandler::get_type(&format!("{}{}", SOFTWARE_IDENTIFICATION, [0x06, 0x00])), RekordboxEvent::Broadcast);
+    #[test]
+    fn it_should_handle_unknown_packages() {
+        let mut payload: Vec<u8> = Vec::with_capacity(13);
+        payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
+        payload.extend(vec![0x00, 0x00, 0x00]);
+        assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::Unknown);
+    }
+
+    #[test]
+    fn it_should_handle_player_broadcasts() {
+        let mut payload: Vec<u8> = Vec::with_capacity(54);
+        payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
+        payload.extend(vec![0x06, 0x00]);
+        payload.extend(&APPLICATION_NAME.to_vec());
+        payload.extend(vec![0x01, 0x02, 0x00]);
+        payload.extend(vec![
+            0x36,0x03,0x01,0xc8,0x3d,0xfc,
+            0x04,0x1e,0xc4,0xa9,0xfe,0x1e,
+            0xc4,0x02,0x00,0x00,0x00,0x01,
+            0x00
+        ]);
+        assert_eq!(payload.as_slice().len(), 54);
+        assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::PlayerBroadcast);
+
+        //Player {
+        //    model: String::from("XDJ-700"),
+        //    address: SocketAddr::from(([192, 168, 10, 53], 50000)),
+        //    number: 0x01
+        //}
+    }
+
+    // This method is more or less added for documentation purpose.
+    #[test]
+    fn it_should_handle_software_broadcasts() {
+        let mut payload: Vec<u8> = Vec::with_capacity(54);
+        payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
+        payload.extend(vec![0x06, 0x00]);
+        payload.extend(&APPLICATION_NAME.to_vec());
+        payload.extend(vec![0x01, 0x03, 0x00]);
+        payload.extend(vec![
+            0x36,0x03,0x01,0xc8,0x3d,0xfc,
+            0x04,0x1e,0xc4,0xa9,0xfe,0x1e,
+            0xc4,0x02,0x00,0x00,0x00,0x01,
+            0x00
+        ]);
+        assert_eq!(payload.as_slice().len(), 54);
+        assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::ApplicationBroadcast);
     }
 }
