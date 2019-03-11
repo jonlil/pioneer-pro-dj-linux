@@ -192,3 +192,56 @@ impl Message {
         }
     }
 }
+
+pub struct RekordboxEventHandler;
+impl RekordboxEventHandler {
+    pub fn is_rekordbox_event(data: &[u8]) -> bool {
+        if data.len() < SOFTWARE_IDENTIFICATION.len() {
+            return false
+        }
+
+        if SOFTWARE_IDENTIFICATION  == &data[..SOFTWARE_IDENTIFICATION.len()] {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn get_type(buffer: &[u8]) -> RekordboxEvent {
+        RekordboxEvent::Broadcast
+    }
+
+    pub fn parse(buffer: &[u8]) {
+        Self::parse_raw_event(buffer);
+    }
+
+    fn parse_raw_event(buffer: &[u8]) -> Result<(), &'static str> {
+        if !Self::is_rekordbox_event(&buffer) {}
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RekordboxEvent {
+    Broadcast
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        RekordboxEventHandler,
+        RekordboxEvent,
+        SOFTWARE_IDENTIFICATION
+    };
+
+    #[test]
+    fn it_should_identify_rekordbox_in_network() {
+        assert_eq!(RekordboxEventHandler::is_rekordbox_event(&[0x00, 0x01]), false);
+        assert_eq!(RekordboxEventHandler::is_rekordbox_event(&SOFTWARE_IDENTIFICATION), true);
+    }
+
+    fn it_should_extract_type_from_package() {
+        assert_eq!(RekordboxEventHandler::get_type(&format!("{}{}", SOFTWARE_IDENTIFICATION, [0x06, 0x00])), RekordboxEvent::Broadcast);
+    }
+}
