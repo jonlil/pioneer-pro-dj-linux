@@ -1,16 +1,16 @@
-use crate::rekordbox::RekordboxToken;
 use crate::utils::MacAddr;
+use std::net::Ipv4Addr;
 
 pub struct ApplicationBroadcast<'a> {
-    token: &'a RekordboxToken,
+    address: Ipv4Addr,
     physical_address: &'a MacAddr,
 }
 
-impl ApplicationBroadcast {
-    pub fn new(token: &RekordboxToken, physical_address: &MacAddr) -> Self {
+impl <'a>ApplicationBroadcast<'a> {
+    pub fn new(address: Ipv4Addr, physical_address: &'a MacAddr) -> Self {
         Self {
-            token: token,
+            address: address,
             physical_address: physical_address
-        } 
+        }
     }
 }

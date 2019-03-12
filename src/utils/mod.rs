@@ -30,6 +30,7 @@ mod tests {
     use crate::utils::MacAddr;
 
     #[test]
+    #[cfg_attr(not(feature = "expensive_tests"), ignore)]
     fn it_should_convert_from_string() {
         assert_eq!(MacAddr::from("00:00:ef:ab:da:06"), MacAddr {
             a: 0x00,
