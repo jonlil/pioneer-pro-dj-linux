@@ -98,8 +98,15 @@ fn main() -> Result<(), io::Error> {
                 eprintln!("Reading buffer");
                 let mut buffer = [0u8; 512];
                 match socket.recv_from(&mut buffer) {
-                    Ok((number_of_bytes, source)) => {
-                        eprintln!("{}: {} - {:?}", source, number_of_bytes, &buffer[..number_of_bytes]);
+                    Ok(metadata) => {
+                        let buffer = &buffer[..metadata.0];
+                        match RekordboxEventHandler::parse(buffer, metadata) {
+                            Ok(RekordboxMessage::Player(player)) => {
+                                eprintln!("{:?}", player);
+                            }
+                            Err(error) => eprintln!("{:?}", error),
+                            _ => ()
+                        }
                     }
                     Err(error) => {
                         eprintln!("Failed reading broadcast socket: #{:?}", error);

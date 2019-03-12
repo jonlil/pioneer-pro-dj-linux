@@ -1,6 +1,6 @@
 mod message;
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::str;
 
 // TODO: Make private
@@ -16,37 +16,23 @@ pub const APPLICATION_NAME: [u8; 20] = [
 #[derive(Debug, PartialEq)]
 pub struct Player {
     model: String,
-    address: SocketAddr,
+    address: Ipv4Addr,
     number: u8,
-    token: RekordboxToken,
 }
 
 impl Player {
     pub fn new(
         model: String,
         number: u8,
-        token: RekordboxToken,
-        address: SocketAddr
+        address: Ipv4Addr,
     ) -> Self {
-        Self { model: model, number: number, token: token, address: address }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct RekordboxToken {
-    a: u8,
-    b: u8,
-    c: u8,
-}
-
-impl RekordboxToken {
-    pub fn new(a: u8, b: u8, c: u8) -> Self {
-        Self { a: a, b: b, c: c }
+        Self { model: model, number: number, address: address }
     }
 }
 
 pub enum RekordboxMessage {
     Player(Player),
+    NotImplemented,
 }
 
 pub struct RekordboxEventHandler;
@@ -78,7 +64,7 @@ impl RekordboxEventHandler {
                 return RekordboxEvent::PlayerBroadcast {
                     model: model_name.to_string(),
                     number: buffer[36],
-                    token: RekordboxToken::new(buffer[44], buffer[45], buffer[46]),
+                    address: Ipv4Addr::new(buffer[44], buffer[45], buffer[46], buffer[47]),
                 }
             } else if &buffer[32..=34] == &[0x01, 0x03, 0x00] {
                 return RekordboxEvent::ApplicationBroadcast
@@ -88,16 +74,19 @@ impl RekordboxEventHandler {
         RekordboxEvent::Unknown
     }
 
-    pub fn parse(buffer: &[u8], metadata: (usize, SocketAddr)) -> Option<RekordboxMessage> {
+    pub fn parse(
+        buffer: &[u8],
+        metadata: (usize, SocketAddr)
+    ) -> Result<RekordboxMessage, &'static str> {
         match Self::get_type(buffer) {
-            RekordboxEvent::PlayerBroadcast { model, number, token } => {
-                Some(RekordboxMessage::Player(
-                    Player::new(model, number, token, metadata.1)
+            RekordboxEvent::PlayerBroadcast { model, number, address } => {
+                Ok(RekordboxMessage::Player(
+                    Player::new(model, number, address)
                 ))
-            },
-            RekordboxEvent::ApplicationBroadcast => None,
-            RekordboxEvent::Error => None,
-            RekordboxEvent::Unknown => None,
+            }
+            RekordboxEvent::ApplicationBroadcast => Ok(RekordboxMessage::NotImplemented),
+            RekordboxEvent::Error => Err("Unknown parsing error."),
+            RekordboxEvent::Unknown => Ok(RekordboxMessage::NotImplemented),
         }
     }
 }
@@ -107,7 +96,7 @@ pub enum RekordboxEvent {
     PlayerBroadcast {
         model: String,
         number: u8,
-        token: RekordboxToken,
+        address: Ipv4Addr,
     },
     ApplicationBroadcast,
     Unknown,
@@ -119,11 +108,11 @@ mod tests {
     use crate::rekordbox::{
         RekordboxEventHandler,
         RekordboxEvent,
-        RekordboxToken,
         SOFTWARE_IDENTIFICATION,
         APPLICATION_NAME,
     };
     use std::str;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn it_should_identify_rekordbox_in_network() {
@@ -156,7 +145,7 @@ mod tests {
         assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::PlayerBroadcast {
             model: str::from_utf8(&APPLICATION_NAME[..]).unwrap().trim_end_matches('\u{0}').to_string(),
             number: 0x03,
-            token: RekordboxToken::new(0xa9, 0xfe, 0x1e),
+            address: Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4),
         });
     }
 
