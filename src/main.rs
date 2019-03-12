@@ -1,4 +1,5 @@
 mod rekordbox;
+mod utils;
 
 extern crate rand;
 

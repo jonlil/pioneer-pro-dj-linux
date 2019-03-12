@@ -1,3 +1,5 @@
+mod message;
+
 use std::net::SocketAddr;
 use std::str;
 
@@ -10,6 +12,38 @@ pub const SOFTWARE_IDENTIFICATION: [u8; 10] = [
 pub const APPLICATION_NAME: [u8; 20] = [
     0x4c,0x69,0x6e,0x75,0x78,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
 ];
+
+#[derive(Debug, PartialEq)]
+pub struct Player {
+    model: String,
+    address: SocketAddr,
+    number: u8,
+    token: RekordboxToken,
+}
+
+impl Player {
+    pub fn new(
+        model: String,
+        number: u8,
+        token: RekordboxToken,
+        address: SocketAddr
+    ) -> Self {
+        Self { model: model, number: number, token: token, address: address }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RekordboxToken {
+    a: u8,
+    b: u8,
+    c: u8,
+}
+
+impl RekordboxToken {
+    pub fn new(a: u8, b: u8, c: u8) -> Self {
+        Self { a: a, b: b, c: c }
+    }
+}
 
 pub enum RekordboxMessage {
     Player(Player),
@@ -65,38 +99,6 @@ impl RekordboxEventHandler {
             RekordboxEvent::Error => None,
             RekordboxEvent::Unknown => None,
         }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Player {
-    model: String,
-    address: SocketAddr,
-    number: u8,
-    token: RekordboxToken,
-}
-
-impl Player {
-    pub fn new(
-        model: String,
-        number: u8,
-        token: RekordboxToken,
-        address: SocketAddr
-    ) -> Self {
-        Self { model: model, number: number, token: token, address: address }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct RekordboxToken {
-    a: u8,
-    b: u8,
-    c: u8,
-}
-
-impl RekordboxToken {
-    pub fn new(a: u8, b: u8, c: u8) -> Self {
-        Self { a: a, b: b, c: c }
     }
 }
 
