@@ -6,11 +6,11 @@ pub struct ApplicationBroadcast<'a> {
     physical_address: &'a MacAddr,
 }
 
-impl ApplicationBroadcast {
-    pub fn new(token: &RekordboxToken, physical_address: &MacAddr) -> Self {
+impl <'a>ApplicationBroadcast<'a> {
+    pub fn new(token: &'a RekordboxToken, physical_address: &'a MacAddr) -> Self {
         Self {
             token: token,
             physical_address: physical_address
-        } 
+        }
     }
 }
