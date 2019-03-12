@@ -1,6 +1,7 @@
 mod message;
 
 use std::net::{Ipv4Addr, SocketAddr};
+use crate::player::{Player};
 use std::str;
 
 // TODO: Make private
@@ -12,23 +13,6 @@ pub const SOFTWARE_IDENTIFICATION: [u8; 10] = [
 pub const APPLICATION_NAME: [u8; 20] = [
     0x4c,0x69,0x6e,0x75,0x78,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
 ];
-
-#[derive(Debug, PartialEq)]
-pub struct Player {
-    model: String,
-    address: Ipv4Addr,
-    number: u8,
-}
-
-impl Player {
-    pub fn new(
-        model: String,
-        number: u8,
-        address: Ipv4Addr,
-    ) -> Self {
-        Self { model: model, number: number, address: address }
-    }
-}
 
 pub enum RekordboxMessage {
     Player(Player),
