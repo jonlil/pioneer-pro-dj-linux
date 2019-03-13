@@ -3,7 +3,9 @@ mod utils;
 mod player;
 
 extern crate rand;
+extern crate pnet;
 
+use pnet::datalink::interfaces;
 use std::thread;
 use std::net::{UdpSocket, ToSocketAddrs};
 use std::io;
@@ -63,6 +65,12 @@ fn main() -> Result<(), io::Error> {
         broadcast_address: "192.168.10.255",
         players: PlayerCollection::new(),
     };
+
+    for interface in interfaces() {
+        eprintln!("{:?}", interface);
+    }
+
+    return Ok(());
 
     let threehoundred_millis = Duration::from_millis(300);
     let socket = UdpSocket::bind(("0.0.0.0", 50000)).unwrap();
