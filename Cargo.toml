@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 rand = "0.6"
 pnet = "0.22.0"
+ipnetwork = "0.14.0"

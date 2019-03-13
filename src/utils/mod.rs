@@ -1,3 +1,5 @@
+mod network;
+
 #[derive(Debug, PartialEq)]
 pub struct MacAddr {
     a: u8,
