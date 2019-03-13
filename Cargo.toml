@@ -1,5 +1,5 @@
 [package]
-name = "pioneer-pro-dj-linux-v2"
+name = "pioneer-pro-dj-linux"
 version = "0.1.0"
 authors = ["Jonas Liljestrand <jonas.liljestrand@gmail.com>"]
 edition = "2018"
