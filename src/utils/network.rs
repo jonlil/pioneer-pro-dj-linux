@@ -1,14 +1,37 @@
 extern crate pnet;
 extern crate ipnetwork;
 
-use pnet::datalink::{NetworkInterface};
+use pnet::datalink::{NetworkInterface, MacAddr};
 use ipnetwork::{IpNetwork};
 use std::net::IpAddr;
 
-pub fn find_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<IpNetwork> {
+#[derive(Debug, PartialEq)]
+pub struct PioneerNetwork {
+    network: IpNetwork,
+    mac: MacAddr,
+}
+
+impl PioneerNetwork {
+    pub fn new(network: IpNetwork, mac: MacAddr) -> Self {
+        Self { network: network, mac: mac }
+    }
+
+    pub fn contains(&self, ip: IpAddr) -> bool {
+        self.network.contains(ip)
+    }
+
+    pub fn ip(&self) -> IpAddr {
+        self.network.ip()
+    }
+}
+
+pub fn find_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<PioneerNetwork> {
     ifaces.iter()
-        .flat_map(|iface| iface.ips.to_owned())
-        .filter(|network: &IpNetwork| network.contains(address))
+        .flat_map(|iface| iface.ips.iter().map(move |ip| PioneerNetwork {
+            network: *ip,
+            mac: iface.mac.unwrap(),
+        }))
+        .filter(|network: &PioneerNetwork| network.contains(address))
         .next()
 }
 
@@ -30,7 +53,10 @@ mod tests {
     };
 
 
-    use crate::utils::network::find_interface;
+    use crate::utils::network::{
+        find_interface,
+        PioneerNetwork,
+    };
 
     fn interfaces() -> Vec<NetworkInterface> {
         vec![
@@ -81,7 +107,7 @@ mod tests {
                 index: 0,
                 flags: 69699,
                 ips: vec![
-                    IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(0xa9, 0xfe, 0x13, 0xe6), 16).unwrap()),
+                    IpNetwork::V4(Ipv4Network::new(Ipv4Addr::new(169, 254, 21, 48), 16).unwrap()),
                 ],
             },
         ]
@@ -90,11 +116,16 @@ mod tests {
     #[test]
     fn it_finds_local_address_based_on_remote_address() {
         let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 10, 52));
-        let local_network_address = IpAddr::V4(Ipv4Addr::new(192, 168, 10, 50));
+        let local_network_address = IpNetwork::V4(Ipv4Network::new(
+                Ipv4Addr::new(192, 168, 10, 50), 24).unwrap());
+
         let network = find_interface(interfaces(), remote_address);
 
         assert_eq!(network.is_none(), false);
-        assert_eq!(network.unwrap().ip(), local_network_address);
+        assert_eq!(network, Some(PioneerNetwork {
+            network: local_network_address,
+            mac: MacAddr::new(0x00, 0x45, 0xcb, 0x9a, 0xa5, 0x0b)
+        }));
     }
 
     #[test]
