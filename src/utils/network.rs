@@ -1,7 +1,7 @@
 extern crate pnet;
 extern crate ipnetwork;
 
-use pnet::datalink::{NetworkInterface, MacAddr};
+use pnet::datalink::{NetworkInterface, MacAddr, interfaces};
 use ipnetwork::{IpNetwork};
 use std::net::IpAddr;
 
@@ -23,9 +23,21 @@ impl PioneerNetwork {
     pub fn ip(&self) -> IpAddr {
         self.network.ip()
     }
+
+    pub fn mac_address(&self) -> MacAddr {
+        self.mac
+    }
+
+    pub fn broadcast(&self) -> IpAddr {
+        self.network.broadcast()
+    }
 }
 
-pub fn find_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<PioneerNetwork> {
+pub fn find_interface(address: IpAddr) -> Option<PioneerNetwork> {
+    match_interface(interfaces(), address)
+}
+
+fn match_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<PioneerNetwork> {
     ifaces.iter()
         .flat_map(|iface| iface.ips.iter().map(move |ip| PioneerNetwork {
             network: *ip,
@@ -54,7 +66,7 @@ mod tests {
 
 
     use crate::utils::network::{
-        find_interface,
+        match_interface,
         PioneerNetwork,
     };
 
@@ -119,7 +131,7 @@ mod tests {
         let local_network_address = IpNetwork::V4(Ipv4Network::new(
                 Ipv4Addr::new(192, 168, 10, 50), 24).unwrap());
 
-        let network = find_interface(interfaces(), remote_address);
+        let network = match_interface(interfaces(), remote_address);
 
         assert_eq!(network.is_none(), false);
         assert_eq!(network, Some(PioneerNetwork {
@@ -132,7 +144,7 @@ mod tests {
     fn it_find_network_in_a_smaller_cidr() {
         let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 230));
         let local_network_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 200));
-        let network = find_interface(interfaces(), remote_address);
+        let network = match_interface(interfaces(), remote_address);
 
         assert_eq!(network.is_none(), false);
         assert_eq!(network.unwrap().ip(), local_network_address);
@@ -140,7 +152,7 @@ mod tests {
 
         let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 24));
         let local_network_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 50));
-        let network = find_interface(interfaces(), remote_address);
+        let network = match_interface(interfaces(), remote_address);
 
         assert_eq!(network.is_none(), false);
         assert_eq!(network.unwrap().ip(), local_network_address);

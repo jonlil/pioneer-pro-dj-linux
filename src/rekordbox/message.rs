@@ -1,4 +1,6 @@
-use crate::utils::MacAddr;
+extern crate pnet;
+
+use pnet::datalink::MacAddr;
 use std::net::Ipv4Addr;
 
 pub struct ApplicationBroadcast<'a> {

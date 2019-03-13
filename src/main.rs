@@ -7,7 +7,7 @@ extern crate pnet;
 
 use pnet::datalink::interfaces;
 use std::thread;
-use std::net::{UdpSocket, ToSocketAddrs};
+use std::net::{UdpSocket, ToSocketAddrs, IpAddr};
 use std::io;
 use std::time::{Duration};
 use rand::Rng;
@@ -19,11 +19,10 @@ use crate::rekordbox::{
     RekordboxMessage,
 };
 use crate::player::{PlayerCollection};
-
-
-const MAC_ADDRESS: [u8; 6] = [
-    0x60, 0x45, 0xcb, 0x9a, 0xa5, 0x0b
-];
+use crate::utils::network::{
+    find_interface,
+    PioneerNetwork,
+};
 
 pub fn send_data<A: ToSocketAddrs>(
     socket: &UdpSocket,
@@ -44,33 +43,23 @@ fn to_socket_package(item: Vec<Vec<u8>>) -> Vec<u8> {
     item.into_iter().flatten().collect::<Vec<u8>>()
 }
 
-fn random_broadcast_socket(app: &App, data: PioneerMessage) {
+fn random_broadcast_socket(address: &PioneerNetwork, data: PioneerMessage) {
     let port = rand::thread_rng().gen_range(45000, 55000);
-    let socket = UdpSocket::bind((app.listening_address, port)).unwrap();
+    let socket = UdpSocket::bind((address.ip(), port)).unwrap();
     socket.set_broadcast(true).unwrap();
-    send_data(&socket, (app.broadcast_address, 50000), data);
+    send_data(&socket, (address.broadcast(), 50000), data);
 }
 
 struct App<'a> {
-    listening_address: &'a str,
-    broadcast_address: &'a str,
+    listening_address: Option<&'a PioneerNetwork>,
     players: PlayerCollection,
 }
 
-
 fn main() -> Result<(), io::Error> {
-
     let mut app = App {
-        listening_address: "192.168.10.50",
-        broadcast_address: "192.168.10.255",
+        listening_address: None,
         players: PlayerCollection::new(),
     };
-
-    for interface in interfaces() {
-        eprintln!("{:?}", interface);
-    }
-
-    return Ok(());
 
     let threehoundred_millis = Duration::from_millis(300);
     let socket = UdpSocket::bind(("0.0.0.0", 50000)).unwrap();
@@ -100,26 +89,29 @@ fn main() -> Result<(), io::Error> {
     }
 
     eprintln!("{:?}", app.players);
+    let network = find_interface(app.players[0].address());
 
-    let thread_sleep = Duration::from_millis(50);
-    for sequence in 0x01 ..= 0x03 {
-        random_broadcast_socket(&app, Message::phase1(sequence));
-        thread::sleep(thread_sleep);
-    }
-    for sequence in 0x01..=0x06 {
-        for index in 1..=6 {
-            random_broadcast_socket(&app, Message::phase2(sequence, index));
+    if let Some(network) = network {
+        let thread_sleep = Duration::from_millis(50);
+        for sequence in 0x01 ..= 0x03 {
+            random_broadcast_socket(&network, Message::phase1(sequence, &network));
             thread::sleep(thread_sleep);
         }
-    }
-    random_broadcast_socket(&app, Message::broadcast());
-
-    thread::spawn(move || {
-        let threehoundred_millis = Duration::from_millis(300);
-        loop {
-            thread::sleep(threehoundred_millis);
+        for sequence in 0x01..=0x06 {
+            for index in 1..=6 {
+                random_broadcast_socket(&network, Message::phase2(sequence, index, &network));
+                thread::sleep(thread_sleep);
+            }
         }
-    }).join().expect("Failed to blaha");
+        random_broadcast_socket(&network, Message::broadcast(&network));
+
+        thread::spawn(move || {
+            let threehoundred_millis = Duration::from_millis(300);
+            loop {
+                thread::sleep(threehoundred_millis);
+            }
+        }).join().expect("Failed to blaha");
+    }
 
     Ok(())
 }
@@ -128,43 +120,43 @@ type PioneerMessage = Vec<Vec<u8>>;
 
 struct Message;
 impl Message {
-    pub fn broadcast() -> PioneerMessage {
+    pub fn broadcast(network: &PioneerNetwork) -> PioneerMessage {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
             vec![0x06, 0x00],
             APPLICATION_NAME.to_vec(),
             vec![0x01,0x03,0x00],
             vec![0x36,0x11,0x01],
-            MAC_ADDRESS.to_vec(),
-
-            // This is the IP-address on the interface
-            // receiving traffic from players.
-            vec![0xc0,0xa8,0x0a,0x32],
+            <[u8; 6]>::from(network.mac_address()).to_vec(),
+            match network.ip() {
+                IpAddr::V4(ip) => ip.octets().to_vec(),
+                IpAddr::V6(ip) => vec![],
+            },
             vec![0x01,0x01,0x00,0x00,0x04,0x08]
         ]
     }
 
-    pub fn phase1(sequence: u8) -> PioneerMessage {
+    pub fn phase1(sequence: u8, network: &PioneerNetwork) -> PioneerMessage {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
             vec![0x00,0x00],
             APPLICATION_NAME.to_vec(),
             vec![0x01, 0x03, 0x00, 0x2c, sequence, 0x04],
-            MAC_ADDRESS.to_vec(),
+            <[u8; 6]>::from(network.mac_address()).to_vec(),
         ]
     }
 
-    pub fn phase2(sequence: u8, index: i32) -> PioneerMessage {
+    pub fn phase2(sequence: u8, index: i32, network: &PioneerNetwork) -> PioneerMessage {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
             vec![0x02, 0x00],
             APPLICATION_NAME.to_vec(),
             vec![0x01, 0x03, 0x00, 0x32],
-
-            // This is the IP-address on the interface
-            // receiving traffic from players.
-            vec![0xc0,0xa8,0x0a,0x32],
-            MAC_ADDRESS.to_vec(),
+            match network.ip() {
+                IpAddr::V4(ip) => ip.octets().to_vec(),
+                IpAddr::V6(ip) => vec![],
+            },
+            <[u8; 6]>::from(network.mac_address()).to_vec(),
             vec![Self::map_sequence_byte(index), sequence],
             vec![0x04, 0x01]
         ]

@@ -1,16 +1,20 @@
-use std::net::{Ipv4Addr};
+use std::net::{IpAddr};
 use std::ops::Index;
 
 #[derive(Debug, Clone)]
 pub struct Player {
     model: String,
-    address: Ipv4Addr,
+    address: IpAddr,
     number: u8,
 }
 
 impl Player {
-    pub fn new(model: String, number: u8, address: Ipv4Addr) -> Self {
+    pub fn new(model: String, number: u8, address: IpAddr) -> Self {
         Self { model: model, number: number, address: address }
+    }
+
+    pub fn address(&self) -> IpAddr {
+        self.address
     }
 }
 
@@ -44,7 +48,7 @@ impl PlayerCollection {
         self.players.push(player);
     }
 
-    pub fn get_mut(&mut self, address: &Ipv4Addr) -> Option<&mut Player> {
+    pub fn get_mut(&mut self, address: &IpAddr) -> Option<&mut Player> {
         self.players.iter_mut().find(|p| p.address == *address)
     }
 
@@ -90,14 +94,14 @@ impl Index<usize> for PlayerCollection {
 #[cfg(test)]
 mod tests {
     use crate::player::{PlayerCollection, Player};
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, IpAddr};
 
     #[test]
     fn it_support_pushing() {
         let mut players = PlayerCollection::new();
         players.push(Player {
             number: 0x01,
-            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x01),
+            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
             model: String::from("XDJ-700")
         });
 
@@ -109,14 +113,14 @@ mod tests {
         let mut players = PlayerCollection::new();
         players.push(Player {
             number: 0x01,
-            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x01),
+            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
             model: String::from("XDJ-700")
         });
         assert_eq!(players[0].number, 0x01);
 
         players.add_or_update(Player {
             number: 0x02,
-            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x01),
+            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
             model: String::from("XDJ-700")
         });
         assert_eq!(players.len(), 1);
@@ -124,7 +128,7 @@ mod tests {
 
         players.add_or_update(Player {
             number: 0x03,
-            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x05),
+            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x05)),
             model: String::from("XDJ-700")
         });
         assert_eq!(players.len(), 2);

@@ -1,6 +1,6 @@
 mod message;
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr, SocketAddr, IpAddr};
 use crate::player::{Player};
 use std::str;
 
@@ -48,7 +48,7 @@ impl RekordboxEventHandler {
                 return RekordboxEvent::PlayerBroadcast {
                     model: model_name.to_string(),
                     number: buffer[36],
-                    address: Ipv4Addr::new(buffer[44], buffer[45], buffer[46], buffer[47]),
+                    address: IpAddr::V4(Ipv4Addr::new(buffer[44], buffer[45], buffer[46], buffer[47])),
                 }
             } else if &buffer[32..=34] == &[0x01, 0x03, 0x00] {
                 return RekordboxEvent::ApplicationBroadcast
@@ -80,7 +80,7 @@ pub enum RekordboxEvent {
     PlayerBroadcast {
         model: String,
         number: u8,
-        address: Ipv4Addr,
+        address: IpAddr,
     },
     ApplicationBroadcast,
     Unknown,
@@ -96,7 +96,7 @@ mod tests {
         APPLICATION_NAME,
     };
     use std::str;
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn it_should_identify_rekordbox_in_network() {
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::PlayerBroadcast {
             model: str::from_utf8(&APPLICATION_NAME[..]).unwrap().trim_end_matches('\u{0}').to_string(),
             number: 0x03,
-            address: Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4),
+            address: IpAddr::V4(Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4)),
         });
     }
 
