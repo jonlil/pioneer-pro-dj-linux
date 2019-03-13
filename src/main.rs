@@ -50,14 +50,14 @@ fn random_broadcast_socket(address: &PioneerNetwork, data: PioneerMessage) {
     send_data(&socket, (address.broadcast(), 50000), data);
 }
 
-struct App<'a> {
-    listening_address: Option<&'a PioneerNetwork>,
+struct App {
+    network: Option<PioneerNetwork>,
     players: PlayerCollection,
 }
 
 fn main() -> Result<(), io::Error> {
     let mut app = App {
-        listening_address: None,
+        network: None,
         players: PlayerCollection::new(),
     };
 
@@ -89,9 +89,9 @@ fn main() -> Result<(), io::Error> {
     }
 
     eprintln!("{:?}", app.players);
-    let network = find_interface(app.players[0].address());
+    app.network = find_interface(app.players[0].address());
 
-    if let Some(network) = network {
+    if let Some(network) = app.network {
         let thread_sleep = Duration::from_millis(50);
         for sequence in 0x01 ..= 0x03 {
             random_broadcast_socket(&network, Message::phase1(sequence, &network));
