@@ -2,6 +2,10 @@
 
 In this file I will try to add important milestones/achievements in a happy format.
 
+#### 2019-03-13
+Managed to automate network discovery. I.E. find the interface/network address that CD-players
+broadcast on. Use that network and send out initial linking / broadcasting packages.
+
 #### 2019-03-12
 Manged to finally get my XDJ-700 to respond to the network traffic.
 The key part is to send packages in the right order and to package correct IP-address and MAC address.
