@@ -1,4 +1,4 @@
-mod message;
+pub mod message;
 
 use std::net::{Ipv4Addr, SocketAddr, IpAddr};
 use crate::player::{Player};
@@ -151,4 +151,3 @@ mod tests {
         assert_eq!(RekordboxEventHandler::get_type(&payload), RekordboxEvent::ApplicationBroadcast);
     }
 }
-
