@@ -9,7 +9,7 @@ use crate::rekordbox::{
 };
 use crate::utils::network::PioneerNetwork;
 
-pub type RekordboxMessageType = Vec<Vec<u8>>;
+pub type RekordboxMessageType = Vec<u8>;
 
 #[derive(Debug, PartialEq)]
 pub struct ApplicationBroadcast<'a> {
@@ -18,14 +18,12 @@ pub struct ApplicationBroadcast<'a> {
 
 impl <'a>ApplicationBroadcast<'a> {
     pub fn new(network: &'a PioneerNetwork) -> Self {
-        Self {
-            network: network,
-        }
+        Self { network: network }
     }
 }
 
 impl <'a>IntoRekordboxMessage for ApplicationBroadcast<'a> {
-    fn compose(&self) -> RekordboxMessageType {
+    fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
             vec![0x06, 0x00],
@@ -42,8 +40,8 @@ impl <'a>IntoRekordboxMessage for ApplicationBroadcast<'a> {
 }
 
 impl <'a>Into<RekordboxMessageType> for ApplicationBroadcast<'a> {
-    fn into(self) -> Vec<Vec<u8>> {
-        self.compose()
+    fn into(self) -> RekordboxMessageType {
+        self.compose().into_iter().flatten().collect()
     }
 }
 
@@ -59,7 +57,7 @@ impl <'a>DiscoveryInitial<'a> {
 }
 
 impl <'a>IntoRekordboxMessage for DiscoveryInitial<'a> {
-    fn compose(&self) -> RekordboxMessageType {
+    fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
             vec![0x00,0x00],
@@ -72,7 +70,7 @@ impl <'a>IntoRekordboxMessage for DiscoveryInitial<'a> {
 
 impl <'a>Into<RekordboxMessageType> for DiscoveryInitial<'a> {
     fn into(self) -> RekordboxMessageType {
-        self.compose()
+        self.compose().into_iter().flatten().collect()
     }
 }
 
@@ -107,7 +105,7 @@ impl <'a>DiscoverySequence<'a> {
 // TODO: Possible performance fix here is to reuse this struct instead of composing
 // new ones for each of these 36 messages.
 impl <'a>IntoRekordboxMessage for DiscoverySequence<'a> {
-    fn compose(&self) -> RekordboxMessageType {
+    fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
             vec![0x02, 0x00],
@@ -126,10 +124,10 @@ impl <'a>IntoRekordboxMessage for DiscoverySequence<'a> {
 
 impl <'a>Into<RekordboxMessageType> for DiscoverySequence<'a> {
     fn into(self) -> RekordboxMessageType {
-        self.compose()
+        self.compose().into_iter().flatten().collect()
     }
 }
 
 trait IntoRekordboxMessage {
-    fn compose(&self) -> RekordboxMessageType;
+    fn compose(&self) -> Vec<RekordboxMessageType>;
 }

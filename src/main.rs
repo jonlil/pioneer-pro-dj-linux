@@ -5,15 +5,12 @@ mod player;
 extern crate rand;
 extern crate pnet;
 
-use pnet::datalink::interfaces;
 use std::thread;
-use std::net::{UdpSocket, ToSocketAddrs, IpAddr};
+use std::net::{UdpSocket, ToSocketAddrs};
 use std::io;
 use std::time::{Duration};
 use rand::Rng;
 use crate::rekordbox::{
-    SOFTWARE_IDENTIFICATION,
-    APPLICATION_NAME,
     RekordboxEventHandler,
     RekordboxMessage,
 };
@@ -34,7 +31,7 @@ pub fn send_data<A: ToSocketAddrs>(
     addr: A,
     data: RekordboxMessageType
 ) {
-    match socket.send_to(&to_socket_package(data).as_ref(), addr) {
+    match socket.send_to(&data.as_ref(), addr) {
         Ok(number_of_bytes) => {
             eprintln!("{:?}", number_of_bytes);
         }
@@ -42,10 +39,6 @@ pub fn send_data<A: ToSocketAddrs>(
             eprintln!("{:?}", err.to_string());
         }
     }
-}
-
-fn to_socket_package(item: Vec<Vec<u8>>) -> Vec<u8> {
-    item.into_iter().flatten().collect::<Vec<u8>>()
 }
 
 fn random_broadcast_socket(address: &PioneerNetwork, data: RekordboxMessageType) {
