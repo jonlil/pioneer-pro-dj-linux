@@ -1,6 +1,7 @@
 mod rekordbox;
 mod utils;
 mod player;
+mod termdj;
 
 extern crate rand;
 extern crate pnet;
@@ -14,12 +15,7 @@ use crate::rekordbox::{
     RekordboxEventHandler,
     RekordboxMessage,
 };
-use crate::rekordbox::message::{
-    ApplicationBroadcast,
-    DiscoveryInitial,
-    DiscoverySequence,
-    RekordboxMessageType
-};
+use crate::termdj::Message;
 use crate::player::{PlayerCollection};
 use crate::utils::network::{
     find_interface,
@@ -29,7 +25,7 @@ use crate::utils::network::{
 pub fn send_data<A: ToSocketAddrs>(
     socket: &UdpSocket,
     addr: A,
-    data: RekordboxMessageType
+    data: Message::TermDJMessageType
 ) {
     match socket.send_to(&data.as_ref(), addr) {
         Ok(number_of_bytes) => {
@@ -41,7 +37,7 @@ pub fn send_data<A: ToSocketAddrs>(
     }
 }
 
-fn random_broadcast_socket(address: &PioneerNetwork, data: RekordboxMessageType) {
+fn random_broadcast_socket(address: &PioneerNetwork, data: Message::TermDJMessageType) {
     let port = rand::thread_rng().gen_range(45000, 55000);
     let socket = UdpSocket::bind((address.ip(), port)).unwrap();
     socket.set_broadcast(true).unwrap();
@@ -92,16 +88,16 @@ fn main() -> Result<(), io::Error> {
     if let Some(network) = app.network {
         let thread_sleep = Duration::from_millis(50);
         for sequence in 0x01 ..= 0x03 {
-            random_broadcast_socket(&network, DiscoveryInitial::new(&network, sequence).into());
+            random_broadcast_socket(&network, Message::DiscoveryInitial::new(&network, sequence).into());
             thread::sleep(thread_sleep);
         }
         for sequence in 0x01..=0x06 {
             for index in 1..=6 {
-                random_broadcast_socket(&network, DiscoverySequence::new(&network, sequence, index).into());
+                random_broadcast_socket(&network, Message::DiscoverySequence::new(&network, sequence, index).into());
                 thread::sleep(thread_sleep);
             }
         }
-        random_broadcast_socket(&network, ApplicationBroadcast::new(&network).into());
+        random_broadcast_socket(&network, Message::ApplicationBroadcast::new(&network).into());
 
         thread::spawn(move || {
             let threehoundred_millis = Duration::from_millis(300);
