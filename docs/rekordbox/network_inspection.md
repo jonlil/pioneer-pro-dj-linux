@@ -176,9 +176,8 @@ These packages seems to be sent before the player and software has estabilished 
 
 #### Rekordbox link initiation
 
-The players seems to always respond to this event
-This communication is always on port 50002
-Data sent to players is the same.
+IP Destination: player bound address
+UDP dstport: 50002
 
 | device name                   | type? |                           Application name                  | Dunno    |                                                                   |
 |-------------------------------|-------|-------------------------------------------------------------|----------|-------------------------------------------------------------------|
