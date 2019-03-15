@@ -93,7 +93,7 @@ impl Index<usize> for PlayerCollection {
 
 #[cfg(test)]
 mod tests {
-    use crate::player::{PlayerCollection, Player};
+    use crate::rekordbox::player::{PlayerCollection, Player};
     use std::net::{Ipv4Addr, IpAddr};
 
     #[test]
@@ -136,4 +136,3 @@ mod tests {
         assert_eq!(players[1].number, 0x03);
     }
 }
-
