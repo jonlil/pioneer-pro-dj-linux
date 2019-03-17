@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 use crate::rekordbox;
 use crate::rekordbox::event::Event as RekordboxEvent;
+use crate::utils::network::find_interface;
 
 pub enum Event {
     Tick,
@@ -56,9 +57,9 @@ pub struct App {
 impl App {
     pub fn run(&mut self) -> Result<(), rekordbox::client::Error> {
         let (tx, rx) = mpsc::channel::<RekordboxEvent>();
+        let mut rekordbox_client = rekordbox::client::Client::new();
 
         thread::spawn(move || {
-            let rekordbox_client = rekordbox::client::Client::new();
             rekordbox_client.run(&mut RekordboxEventHandler { tx: tx });
         });
 
@@ -69,7 +70,7 @@ impl App {
                         RekordboxEvent::PlayerBroadcast(player) => {
                             self.players.add_or_update(player);
                         }
-                        _ => { eprintln!("Recevied unknown event.") }
+                        _ => { eprintln!("{:?}", evnt) }
                     }
                 }
                 _ => ()

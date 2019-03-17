@@ -2,16 +2,8 @@ use crate::rekordbox::{
     SOFTWARE_IDENTIFICATION,
     APPLICATION_NAME,
 };
-use crate::rekordbox::player::{
-    Player
-};
 use std::net::IpAddr;
 use crate::utils::network::PioneerNetwork;
-
-pub enum Message {
-    Player(Player),
-    NotImplemented,
-}
 
 pub type RekordboxMessageType = Vec<u8>;
 
