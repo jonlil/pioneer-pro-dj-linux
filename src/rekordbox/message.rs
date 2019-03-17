@@ -28,7 +28,7 @@ impl <'a>IntoRekordboxMessage for ApplicationBroadcast<'a> {
             <[u8; 6]>::from(self.network.mac_address()).to_vec(),
             match self.network.ip() {
                 IpAddr::V4(ip) => ip.octets().to_vec(),
-                IpAddr::V6(ip) => panic!("IPv6 is not supported by TermDJ protocol"),
+                IpAddr::V6(_ip) => panic!("IPv6 is not supported by TermDJ protocol"),
             },
             vec![0x01,0x01,0x00,0x00,0x04,0x08]
         ]
@@ -109,7 +109,7 @@ impl <'a>IntoRekordboxMessage for DiscoverySequence<'a> {
             vec![0x01, 0x03, 0x00, 0x32],
             match self.network.ip() {
                 IpAddr::V4(ip) => ip.octets().to_vec(),
-                IpAddr::V6(ip) => vec![],
+                IpAddr::V6(_ip) => panic!("IPv6 is not supported by TermDJ protocol"),
             },
             <[u8; 6]>::from(self.network.mac_address()).to_vec(),
             vec![self.map_sequence_byte(), self.sequence],
@@ -119,6 +119,29 @@ impl <'a>IntoRekordboxMessage for DiscoverySequence<'a> {
 }
 
 impl <'a>Into<RekordboxMessageType> for DiscoverySequence<'a> {
+    fn into(self) -> RekordboxMessageType {
+        self.compose().into_iter().flatten().collect()
+    }
+}
+
+pub struct ApplicationLinkRequest;
+impl ApplicationLinkRequest {
+    pub fn new() -> Self { Self {} }
+}
+
+impl IntoRekordboxMessage for ApplicationLinkRequest {
+    fn compose(&self) -> Vec<RekordboxMessageType> {
+        vec![
+            SOFTWARE_IDENTIFICATION.to_vec(),
+            vec![0x16],
+            APPLICATION_NAME.to_vec(),
+            vec![0x01, 0x01, 0x12],
+            vec![0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00],
+        ]
+    }
+}
+
+impl Into<RekordboxMessageType> for ApplicationLinkRequest {
     fn into(self) -> RekordboxMessageType {
         self.compose().into_iter().flatten().collect()
     }

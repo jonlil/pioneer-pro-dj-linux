@@ -1,43 +1,8 @@
-use crate::utils::network::PioneerNetwork;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use crate::rekordbox;
 use crate::rekordbox::event::Event as RekordboxEvent;
-use crate::utils::network::find_interface;
-
-pub enum Event {
-    Tick,
-}
-
-pub struct Events {
-    rx: mpsc::Receiver<Event>,
-    input_handle: thread::JoinHandle<()>,
-    tick_handle: thread::JoinHandle<()>,
-}
-
-impl Events {
-    pub fn run() {
-        let (tx, rx) = mpsc::channel();
-        let tick_rate = Duration::from_millis(250);
-
-        let tx = tx.clone();
-        let tick_handler = {
-            thread::spawn(move || {
-                let tx = tx.clone();
-
-                loop {
-                    tx.send(Event::Tick).unwrap();
-                    thread::sleep(tick_rate);
-                }
-            })
-        };
-    }
-
-    pub fn next(&self) -> Result<Event, mpsc::RecvError> {
-        self.rx.recv()
-    }
-}
 
 struct RekordboxEventHandler {
     tx: mpsc::Sender<RekordboxEvent>,
@@ -49,34 +14,48 @@ impl rekordbox::client::EventHandler for RekordboxEventHandler {
     }
 }
 
-pub struct App {
-    pub network: Option<PioneerNetwork>,
-    pub players: rekordbox::player::PlayerCollection,
-}
+pub struct App;
 
 impl App {
     pub fn run(&mut self) -> Result<(), rekordbox::client::Error> {
         let (tx, rx) = mpsc::channel::<RekordboxEvent>();
-        let mut rekordbox_client = rekordbox::client::Client::new();
 
-        thread::spawn(move || {
-            rekordbox_client.run(&mut RekordboxEventHandler { tx: tx });
-        });
+        let mut rekordbox_client = rekordbox::client::Client::new();
+        let rekordbox_state = rekordbox_client.state();
+
+        let _rekordbox_handler = {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                rekordbox_client.run(&RekordboxEventHandler {
+                    tx: tx,
+                });
+            })
+        };
+
+
+        let _tick_handler = {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                loop {
+                    tx.send(RekordboxEvent::Tick).unwrap();
+                    thread::sleep(Duration::from_millis(250));
+                }
+            });
+        };
 
         loop {
             match rx.recv() {
                 Ok(evnt) => {
-                    match evnt {
+                    match &evnt {
                         RekordboxEvent::PlayerBroadcast(player) => {
-                            self.players.add_or_update(player);
+                            let state = rekordbox_state.read().unwrap();
+                            eprintln!("{:?}", state.players());
                         }
-                        _ => { eprintln!("{:?}", evnt) }
+                        _ => {}
                     }
                 }
                 _ => ()
             }
-
-            eprintln!("{:?}", self.players);
         }
     }
 }
