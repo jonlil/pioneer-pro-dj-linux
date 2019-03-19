@@ -9,8 +9,8 @@ use rand::Rng;
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use crate::rekordbox::event;
-use crate::rekordbox::EventHandler as EventParser;
-use crate::rekordbox::player::{PlayerCollection, Player};
+use crate::rekordbox::event::EventHandler as EventParser;
+use crate::rekordbox::player::{PlayerCollection};
 
 pub enum Error {
     Generic(String),
