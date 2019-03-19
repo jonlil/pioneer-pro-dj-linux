@@ -6,4 +6,6 @@ pub enum Event {
     ApplicationBroadcast,
     Unknown,
     Error,
+    InitiateLink,
+    Tick,
 }

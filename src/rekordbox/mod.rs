@@ -24,11 +24,7 @@ impl EventHandler {
             return false
         }
 
-        if SOFTWARE_IDENTIFICATION  == &data[..SOFTWARE_IDENTIFICATION.len()] {
-            true
-        } else {
-            false
-        }
+        SOFTWARE_IDENTIFICATION  == data[..SOFTWARE_IDENTIFICATION.len()]
     }
 
     fn get_type(buffer: &[u8]) -> event::Event {

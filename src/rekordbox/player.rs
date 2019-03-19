@@ -1,20 +1,33 @@
-use std::net::{IpAddr};
+use std::net::{IpAddr, UdpSocket};
 use std::ops::Index;
+use std::io;
+use crate::rekordbox::message as Message;
 
 #[derive(Debug, Clone)]
 pub struct Player {
     model: String,
     address: IpAddr,
     number: u8,
+    linking: bool,
 }
 
 impl Player {
     pub fn new(model: String, number: u8, address: IpAddr) -> Self {
-        Self { model: model, number: number, address: address }
+        Self { model: model, number: number, address: address, linking: false }
     }
 
     pub fn address(&self) -> IpAddr {
         self.address
+    }
+
+    pub fn link(&mut self, socket: &UdpSocket) -> Result<(usize), io::Error> {
+        let data: Vec<u8> = Message::ApplicationLinkRequest::new().into();
+        self.linking = true;
+        socket.send_to(data.as_ref(), (self.address, 50002))
+    }
+
+    pub fn is_linking(&self) -> bool {
+        self.linking
     }
 }
 

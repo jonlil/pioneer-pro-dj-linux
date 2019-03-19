@@ -39,12 +39,11 @@ pub fn find_interface(address: IpAddr) -> Option<PioneerNetwork> {
 
 fn match_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<PioneerNetwork> {
     ifaces.iter()
-        .flat_map(|iface| iface.ips.iter().map(move |ip| PioneerNetwork {
-            network: *ip,
-            mac: iface.mac.unwrap(),
-        }))
-        .filter(|network: &PioneerNetwork| network.contains(address))
-        .next()
+        .flat_map(|iface| iface.ips.iter().map(move |ip| PioneerNetwork::new(
+            *ip,
+            iface.mac.unwrap(),
+        )))
+        .find(|network: &PioneerNetwork| network.contains(address))
 }
 
 #[cfg(test)]
