@@ -29,6 +29,10 @@ impl Player {
     pub fn is_linking(&self) -> bool {
         self.linking
     }
+
+    pub fn set_linking(&mut self, val: bool) {
+        self.linking = val;
+    }
 }
 
 impl PartialEq for Player {
@@ -69,6 +73,12 @@ impl PlayerCollection {
         match self.get_mut(&player.address) {
             Some(mut p) => {
                 p.number = player.number;
+
+                // Resetting of this state should be handled by some timer
+                // TODO: Implement unresponsive player checker
+                if p.linking == false && player.linking == true {
+                    p.linking = player.linking;
+                }
             },
             None => {
                 self.push(player);
