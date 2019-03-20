@@ -26,7 +26,7 @@ impl App {
         let _rekordbox_handler = {
             let tx = tx.clone();
             thread::spawn(move || {
-                rekordbox_client.run(&RekordboxEventHandler {
+                let _result = rekordbox_client.run(&RekordboxEventHandler {
                     tx: tx,
                 });
             })
@@ -56,6 +56,9 @@ impl App {
                 }
                 _ => ()
             }
+
+            // Hey, don't steal my CPU.
+            thread::sleep(Duration::from_millis(250));
         }
     }
 }

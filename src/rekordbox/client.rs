@@ -162,6 +162,7 @@ impl Client {
                         },
                         Err(_) => (),
                     }
+                    thread::sleep(Duration::from_millis(50));
                 }
             });
         };
