@@ -1,7 +1,8 @@
 extern crate rand;
 
 use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
-use std::sync::{Arc, Mutex, mpsc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
 use std::io::ErrorKind;
 use std::time::Duration;
@@ -119,7 +120,7 @@ impl Client {
         self.state.clone()
     }
 
-    fn broadcast_handler(socket: UdpSocket, tx: &mpsc::Sender<Event>) -> JoinHandle<()> {
+    fn broadcast_handler(socket: UdpSocket, tx: &Sender<Event>) -> JoinHandle<()> {
         let tx = tx.clone();
 
         thread::spawn(move || loop {
@@ -153,7 +154,7 @@ impl Client {
 
     // This handler should be able to receive messages from the parent thread
     // It may also be good if it had support for unwraping events that it just should respond to.
-    fn message_handler(socket: LockedUdpSocket, tx: mpsc::Sender<Event>) -> JoinHandle<Event> {
+    fn message_handler(socket: LockedUdpSocket, tx: Sender<Event>) -> JoinHandle<Event> {
         thread::spawn(move || {
             loop {
                 let mut buffer = [0u8; 512];
@@ -193,8 +194,21 @@ impl Client {
         })
     }
 
+    fn next(&mut self, rx: Receiver<Event>) {
+        match rx.recv() {
+            Ok(mut evt) => {
+                match &mut evt {
+                    Event::PlayerBroadcast(player) => {},
+                    Event::PlayerLinkingWaiting(player) => {},
+                    _ => {},
+                }
+            },
+            Err(_) => {},
+        };
+    }
+
     pub fn run<T: EventHandler>(&mut self, handler: &T) -> Result<(), Error> {
-        let (tx, rx) = mpsc::channel::<event::Event>();
+        let (tx, rx) = mpsc::channel::<Event>();
 
         let socket = UdpSocket::bind(("0.0.0.0", 50000))
             .map_err(|err| Error::Socket(format!("{}", err)))?;
@@ -290,7 +304,7 @@ impl Client {
         }
     }
 
-    fn event_parser(buffer: &[u8], metadata: (usize, SocketAddr), sender: &mpsc::Sender<Event>) {
+    fn event_parser(buffer: &[u8], metadata: (usize, SocketAddr), sender: &Sender<Event>) {
         sender.send(EventParser::parse(&buffer[..metadata.0], metadata)).unwrap();
     }
 }
