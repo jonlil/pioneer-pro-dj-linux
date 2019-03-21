@@ -1,16 +1,17 @@
 extern crate rand;
 
-use std::net::{UdpSocket, ToSocketAddrs};
-use std::sync::{Arc, Mutex, mpsc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::thread;
+use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
+use std::sync::{Arc, Mutex, mpsc, RwLock};
+use std::thread::{self, JoinHandle};
+use std::io::ErrorKind;
 use std::time::Duration;
 use rand::Rng;
 
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
-use crate::rekordbox::event;
-use crate::rekordbox::event::EventHandler as EventParser;
+use crate::rekordbox::event::{self, Event, EventHandler as EventParser};
 use crate::rekordbox::player::{PlayerCollection};
+use crate::rekordbox::{APPLICATION_NAME, SOFTWARE_IDENTIFICATION};
 
 pub enum Error {
     Generic(String),
@@ -21,7 +22,15 @@ pub enum Error {
 //
 // Provides thread safe access to stateful properties for Rekordbox::Client
 pub struct ClientState {
+    // If the performer has pressed the button to start the linking phase.
     linking: bool,
+
+    // If we have discovered rekordbox compatibile network devices that we have
+    // have in a recent time responded to.
+    discovery: bool,
+
+    // True when the linking & discovery phases have completed
+    linked: bool,
 
     // Network to send Rekordbox messages to
     address: Option<PioneerNetwork>,
@@ -30,11 +39,14 @@ pub struct ClientState {
     pub players: PlayerCollection,
 }
 
+// TODO: Implement macro for llvm generation of getter and setters
 impl ClientState {
     pub fn new() -> Arc<RwLock<Self>> {
         Arc::new(RwLock::new( ClientState {
-            linking: false,
             address: None,
+            discovery: false,
+            linked: false,
+            linking: false,
             players: PlayerCollection::new(),
         } ))
     }
@@ -45,6 +57,14 @@ impl ClientState {
 
     pub fn set_linking(&mut self, value: bool) {
         self.linking = value;
+    }
+
+    pub fn set_discovery(&mut self, value: bool) {
+        self.discovery = value;
+    }
+
+    pub fn is_discovery(&self) -> bool {
+        self.discovery
     }
 
     pub fn is_linking(&self) -> bool {
@@ -60,12 +80,15 @@ impl ClientState {
     }
 }
 
+type LockedClientState = Arc<RwLock<ClientState>>;
+type LockedUdpSocket = Arc<Mutex<UdpSocket>>;
+
 pub trait EventHandler {
     fn on_event(&self, event: event::Event);
 }
 
 pub struct Client {
-    state: Arc<RwLock<ClientState>>,
+    state: LockedClientState,
 }
 
 impl Client {
@@ -75,8 +98,8 @@ impl Client {
         }
     }
 
-    pub fn initiate_link<T: EventHandler>(&self, handler: &T, state: &mut ClientState, address: &PioneerNetwork) {
-        state.set_linking(true);
+    pub fn initiate_discovery<T: EventHandler>(&self, handler: &T, state: &mut ClientState, address: &PioneerNetwork) {
+        state.set_discovery(true);
         handler.on_event(event::Event::InitiateLink);
         let thread_sleep = Duration::from_millis(50);
         for sequence in 0x01 ..= 0x03 {
@@ -92,122 +115,172 @@ impl Client {
         random_broadcast_socket(&address, Message::ApplicationBroadcast::new(&address).into());
     }
 
-    pub fn state(&self) -> Arc<RwLock<ClientState>> {
+    pub fn state(&self) -> LockedClientState {
         self.state.clone()
+    }
+
+    fn broadcast_handler(socket: UdpSocket, tx: &mpsc::Sender<Event>) -> JoinHandle<()> {
+        let tx = tx.clone();
+
+        thread::spawn(move || loop {
+            let mut buffer = [0u8; 512];
+            match socket.recv_from(&mut buffer) {
+                Ok(socket_metadata) => Self::event_parser(&buffer, socket_metadata, &tx),
+                Err(_) => (),
+            }
+        })
+    }
+
+    fn broadcast_sender_handler(state_ref: LockedClientState) -> JoinHandle<Event> {
+        thread::spawn(move || {
+            loop {
+                // TODO: evaluate if the this is required to read fresh data.
+                //       Otherwise it would be a good idea to move the read
+                //       call outside of the loop scope.
+                if let Ok(state) = state_ref.read() {
+                    if let Some(address) = &state.address() {
+                        random_broadcast_socket(
+                            address,
+                            Message::ApplicationBroadcast::new(address).into()
+                        );
+                    }
+                }
+
+                thread::sleep(Duration::from_millis(500));
+            }
+        })
+    }
+
+    // This handler should be able to receive messages from the parent thread
+    // It may also be good if it had support for unwraping events that it just should respond to.
+    fn message_handler(socket: LockedUdpSocket, tx: mpsc::Sender<Event>) -> JoinHandle<Event> {
+        thread::spawn(move || {
+            loop {
+                let mut buffer = [0u8; 512];
+                // The lock is fine here since the socket is set to non_blocking
+                match socket.lock().unwrap().recv_from(&mut buffer) {
+                    Ok(metadata) => Self::event_parser(&buffer, metadata, &tx),
+
+                    // Since this socket is non_blocking we might receive OS Errors (resource
+                    // not available etc.) The error kind matcher reduces the logging of that.
+                    Err(ref err) if err.kind() != ErrorKind::WouldBlock => {
+                        println!("Something went wrong: {}", err)
+                    },
+                    // Don't bother
+                    _ => {},
+                }
+                thread::sleep(Duration::from_millis(150));
+            }
+        })
+    }
+
+    fn portmap_handler() -> JoinHandle<Event> {
+        thread::spawn(move || {
+            let socket = UdpSocket::bind(("0.0.0.0", 50111)).unwrap();
+
+            loop {
+                let mut buffer = [0u8; 512];
+                match socket.recv_from(&mut buffer) {
+                    Ok((number_of_bytes, _source)) => {
+                        eprintln!(
+                            "portmap package\n{:?}",
+                            String::from_utf8_lossy(&buffer[..number_of_bytes]));
+                    },
+                    Err(err) => eprintln!("{:?}", err)
+                }
+                thread::sleep(Duration::from_millis(300));
+            }
+        })
     }
 
     pub fn run<T: EventHandler>(&mut self, handler: &T) -> Result<(), Error> {
         let (tx, rx) = mpsc::channel::<event::Event>();
 
         let socket = UdpSocket::bind(("0.0.0.0", 50000))
-                              .map_err(|err| Error::Socket(format!("{}", err)))?;
+            .map_err(|err| Error::Socket(format!("{}", err)))?;
         socket.set_broadcast(true)
-              .map_err(|err| Error::Generic(format!("{}", err)))?;
+            .map_err(|err| Error::Generic(format!("{}", err)))?;
 
+        // Non-blocking thread safe UdpSocket
+        // TODO: Implement poison management
         let message_socket = UdpSocket::bind(("0.0.0.0", 50002))
             .map_err(|err| Error::Generic(format!("{}", err)))?;
         message_socket.set_nonblocking(true).unwrap();
+        let message_socket_ref: LockedUdpSocket = Arc::new(Mutex::new(message_socket));
 
-        let message_socket_ref = Arc::new(Mutex::new(message_socket));
-
-        let _broadcast_handler = {
-            let tx = tx.clone();
-            thread::spawn(move || loop {
-                let mut buffer = [0u8; 512];
-                match socket.recv_from(&mut buffer) {
-                    Ok((number_of_bytes, source)) => {
-                        tx.send(EventParser::parse(&buffer[..number_of_bytes], (number_of_bytes, source))).unwrap();
-                    },
-                    Err(_) => (),
-                }
-            });
-        };
-
+        let _broadcast_handler = Self::broadcast_handler(socket, &tx);
         // This broadcast handler annonces this applications presense on the network.
-        let _broadcast_sender_handler = {
-            let state_ref = self.state();
-            thread::spawn(move || {
-                loop {
-                    if let Ok(state) = state_ref.read() {
-                        if let Some(address) = &state.address() {
-                            random_broadcast_socket(address,
-                               Message::ApplicationBroadcast::new(address).into());
-                        }
-                    }
+        let _broadcast_sender_handler = Self::broadcast_sender_handler(self.state());
 
-                    thread::sleep(Duration::from_millis(500));
-                }
-            });
-        };
+        // This handler is responsible for reading packages arriving on port 50002
+        let _message_handler = Self::message_handler(message_socket_ref.clone(), tx.clone());
 
-        let _message_handler = {
-            let _tx = tx.clone();
-
-            // Clone message_socket_ref for thread safe access
-            let socket = message_socket_ref.clone();
-
-            thread::spawn(move || {
-                loop {
-                    let mut buffer = [0u8; 512];
-                    match socket.lock().unwrap().recv_from(&mut buffer) {
-                        Ok((number_of_bytes, source)) => {
-                            if number_of_bytes != 284 {
-                                eprintln!(
-                                    "source: {:?}, nob: {}\n{:?}",
-                                    source,
-                                    number_of_bytes,
-                                    String::from_utf8_lossy(&buffer[..number_of_bytes])
-                                );
-                            }
-                        },
-                        Err(_) => (),
-                    }
-                    thread::sleep(Duration::from_millis(50));
-                }
-            });
-        };
-
-        let _portmap_handler = {
-            thread::spawn(move || {
-                let socket = UdpSocket::bind(("0.0.0.0", 50111)).unwrap();
-
-                loop {
-                    eprintln!("PORTMAP HANDLER");
-                    let mut buffer = [0u8; 512];
-                    match socket.recv_from(&mut buffer) {
-                        Ok((number_of_bytes, _source)) => {
-                            eprintln!("portmap package\n{:?}",
-                                      String::from_utf8_lossy(&buffer[..number_of_bytes]));
-                        },
-                        Err(err) => eprintln!("{:?}", err)
-                    }
-                    thread::sleep(Duration::from_millis(300));
-                }
-            });
-        };
+        let _portmap_handler = Self::portmap_handler();
 
         loop {
             match rx.recv() {
                 Ok(mut evt) => {
                     match &mut evt {
-                        event::Event::PlayerBroadcast(player) => {
+                        Event::PlayerBroadcast(player) => {
                             match self.state().write() {
                                 Ok(mut state) => {
                                     if let Some(address) = find_interface(player.address()) {
-                                        if state.is_linking() == false && state.players().len() >= 2 {
-                                            self.initiate_link(handler, &mut state, &address);
+                                        if state.is_discovery() == false && state.players().len() >= 2 {
+                                            self.initiate_discovery(handler, &mut state, &address);
                                         }
                                         state.set_address(address);
-                                        state.players.add_or_update(player.to_owned());
                                     }
+
+                                    // Always update player on broadcast events.
+                                    // DJs might configure their players during performances.
+                                    state.players.add_or_update(player.to_owned());
                                 },
                                 Err(_) => {}
+                            }
+                        },
+                        Event::PlayerLinkingWaiting(player) => {
+                            match message_socket_ref.lock() {
+                                Ok(socket) => {
+                                    let mut payload = vec![];
+                                    payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
+                                    payload.extend(vec![0x11]);
+                                    payload.extend(&APPLICATION_NAME.to_vec());
+                                    payload.extend(vec![0x01, 0x01, 0x11]);
+                                    payload.extend(vec![
+                                        0x01,0x04,0x11,0x01,0x00,0x00,
+                                        0x00,0x4a,0x00,0x6f,0x00,0x6e,
+                                        0x00,0x61,0x00,0x73,0x00,0x73,
+                                        0x00,0x2d,0x00,0x4d,0x00,0x42,
+                                        0x00,0x50,0x00,0x2d,0x00,0x32
+                                    ]);
+                                    payload.extend(vec![0x00; 232]);
+
+                                    match socket.send_to(
+                                        payload.as_slice().as_ref(),
+                                        (player.address(), 50002)
+                                    ) {
+                                        Ok(nob) => {
+                                            eprintln!("sent package to player with bytes: {}", nob);
+                                            match self.state().write() {
+                                                Ok(mut state) => {
+                                                    player.set_linking(true);
+                                                    state.players.add_or_update(player.to_owned());
+                                                },
+                                                Err(err) => {
+                                                    eprintln!("{}", err.to_string());
+                                                },
+                                            }
+                                        },
+                                        _ => {},
+                                    }
+                                },
+                                Err(_) => {},
                             }
                         },
                         _ => (),
                     }
 
-                    if evt != event::Event::ApplicationBroadcast {
+                    if evt != Event::ApplicationBroadcast {
                         handler.on_event(evt);
                     }
                 },
@@ -215,6 +288,10 @@ impl Client {
             }
             thread::sleep(Duration::from_millis(300));
         }
+    }
+
+    fn event_parser(buffer: &[u8], metadata: (usize, SocketAddr), sender: &mpsc::Sender<Event>) {
+        sender.send(EventParser::parse(&buffer[..metadata.0], metadata)).unwrap();
     }
 }
 
