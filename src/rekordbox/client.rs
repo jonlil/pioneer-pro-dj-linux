@@ -194,13 +194,77 @@ impl Client {
         })
     }
 
-    fn next(&mut self, rx: Receiver<Event>) {
+    fn next<T: EventHandler>(
+        &mut self,
+        rx: &Receiver<Event>,
+        socket_ref: &LockedUdpSocket,
+        handler: &T
+    ) {
         match rx.recv() {
             Ok(mut evt) => {
                 match &mut evt {
-                    Event::PlayerBroadcast(player) => {},
-                    Event::PlayerLinkingWaiting(player) => {},
+                    Event::PlayerBroadcast(player) => {
+                        match self.state().write() {
+                            Ok(mut state) => {
+                                if let Some(address) = find_interface(player.address()) {
+                                    if state.is_discovery() == false && state.players().len() >= 2 {
+                                        self.initiate_discovery(handler, &mut state, &address);
+                                    }
+                                    state.set_address(address);
+                                }
+
+                                // Always update player on broadcast events.
+                                // DJs might configure their players during performances.
+                                state.players.add_or_update(player.to_owned());
+                            },
+                            Err(_) => {}
+                        }
+                    },
+                    Event::PlayerLinkingWaiting(player) => {
+                        match socket_ref.lock() {
+                            Ok(socket) => {
+                                let mut payload = vec![];
+                                payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
+                                payload.extend(vec![0x11]);
+                                payload.extend(&APPLICATION_NAME.to_vec());
+                                payload.extend(vec![0x01, 0x01, 0x11]);
+                                payload.extend(vec![
+                                    0x01,0x04,0x11,0x01,0x00,0x00,
+                                    0x00,0x4a,0x00,0x6f,0x00,0x6e,
+                                    0x00,0x61,0x00,0x73,0x00,0x73,
+                                    0x00,0x2d,0x00,0x4d,0x00,0x42,
+                                    0x00,0x50,0x00,0x2d,0x00,0x32
+                                ]);
+                                payload.extend(vec![0x00; 232]);
+
+                                match socket.send_to(
+                                    payload.as_slice().as_ref(),
+                                    (player.address(), 50002)
+                                ) {
+                                    Ok(nob) => {
+                                        eprintln!("sent package to player with bytes: {}", nob);
+                                        match self.state().write() {
+                                            Ok(mut state) => {
+                                                player.set_linking(true);
+                                                state.players.add_or_update(player.to_owned());
+                                            },
+                                            Err(err) => {
+                                                eprintln!("{}", err.to_string());
+                                            },
+                                        }
+                                    },
+                                    _ => {},
+                                }
+                            },
+                            Err(_) => {},
+                        }
+                    },
                     _ => {},
+                }
+
+                // Filter out our own broadcasts
+                if evt != Event::ApplicationBroadcast {
+                    handler.on_event(evt);
                 }
             },
             Err(_) => {},
@@ -232,74 +296,7 @@ impl Client {
         let _portmap_handler = Self::portmap_handler();
 
         loop {
-            match rx.recv() {
-                Ok(mut evt) => {
-                    match &mut evt {
-                        Event::PlayerBroadcast(player) => {
-                            match self.state().write() {
-                                Ok(mut state) => {
-                                    if let Some(address) = find_interface(player.address()) {
-                                        if state.is_discovery() == false && state.players().len() >= 2 {
-                                            self.initiate_discovery(handler, &mut state, &address);
-                                        }
-                                        state.set_address(address);
-                                    }
-
-                                    // Always update player on broadcast events.
-                                    // DJs might configure their players during performances.
-                                    state.players.add_or_update(player.to_owned());
-                                },
-                                Err(_) => {}
-                            }
-                        },
-                        Event::PlayerLinkingWaiting(player) => {
-                            match message_socket_ref.lock() {
-                                Ok(socket) => {
-                                    let mut payload = vec![];
-                                    payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
-                                    payload.extend(vec![0x11]);
-                                    payload.extend(&APPLICATION_NAME.to_vec());
-                                    payload.extend(vec![0x01, 0x01, 0x11]);
-                                    payload.extend(vec![
-                                        0x01,0x04,0x11,0x01,0x00,0x00,
-                                        0x00,0x4a,0x00,0x6f,0x00,0x6e,
-                                        0x00,0x61,0x00,0x73,0x00,0x73,
-                                        0x00,0x2d,0x00,0x4d,0x00,0x42,
-                                        0x00,0x50,0x00,0x2d,0x00,0x32
-                                    ]);
-                                    payload.extend(vec![0x00; 232]);
-
-                                    match socket.send_to(
-                                        payload.as_slice().as_ref(),
-                                        (player.address(), 50002)
-                                    ) {
-                                        Ok(nob) => {
-                                            eprintln!("sent package to player with bytes: {}", nob);
-                                            match self.state().write() {
-                                                Ok(mut state) => {
-                                                    player.set_linking(true);
-                                                    state.players.add_or_update(player.to_owned());
-                                                },
-                                                Err(err) => {
-                                                    eprintln!("{}", err.to_string());
-                                                },
-                                            }
-                                        },
-                                        _ => {},
-                                    }
-                                },
-                                Err(_) => {},
-                            }
-                        },
-                        _ => (),
-                    }
-
-                    if evt != Event::ApplicationBroadcast {
-                        handler.on_event(evt);
-                    }
-                },
-                Err(_) => {},
-            }
+            self.next(&rx, &message_socket_ref, handler);
             thread::sleep(Duration::from_millis(300));
         }
     }
