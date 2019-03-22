@@ -21,7 +21,6 @@ impl App {
         let (tx, rx) = mpsc::channel::<RekordboxEvent>();
 
         let mut rekordbox_client = rekordbox::client::Client::new();
-        let rekordbox_state = rekordbox_client.state();
 
         let _rekordbox_handler = {
             let tx = tx.clone();
@@ -32,24 +31,12 @@ impl App {
             })
         };
 
-
-        let _tick_handler = {
-            let tx = tx.clone();
-            thread::spawn(move || {
-                loop {
-                    tx.send(RekordboxEvent::Tick).unwrap();
-                    thread::sleep(Duration::from_millis(250));
-                }
-            });
-        };
-
         loop {
             match rx.recv() {
                 Ok(evnt) => {
                     match &evnt {
                         RekordboxEvent::PlayerBroadcast(player) => {
-                            let state = rekordbox_state.read().unwrap();
-                            eprintln!("{:?}", state.players());
+                            eprintln!("{:?}", player);
                         }
                         _ => {}
                     }
