@@ -153,6 +153,15 @@ mod tests {
         assert_eq!(players[0].number, 0x02);
 
         players.add_or_update(Player {
+            linking: true,
+            number: 0x02,
+            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
+            model: String::from("XDJ-700")
+        });
+        assert_eq!(players.len(), 1);
+        assert_eq!(players[0].linking, true);
+
+        players.add_or_update(Player {
             linking: false,
             number: 0x03,
             address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x05)),

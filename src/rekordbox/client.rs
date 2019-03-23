@@ -1,7 +1,8 @@
 extern crate rand;
 
 use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
-use std::sync::{Arc, Mutex, mpsc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
 use std::io::ErrorKind;
 use std::time::Duration;
@@ -119,7 +120,7 @@ impl Client {
         self.state.clone()
     }
 
-    fn broadcast_handler(socket: UdpSocket, tx: &mpsc::Sender<Event>) -> JoinHandle<()> {
+    fn broadcast_handler(socket: UdpSocket, tx: &Sender<Event>) -> JoinHandle<()> {
         let tx = tx.clone();
 
         thread::spawn(move || loop {
@@ -153,7 +154,7 @@ impl Client {
 
     // This handler should be able to receive messages from the parent thread
     // It may also be good if it had support for unwraping events that it just should respond to.
-    fn message_handler(socket: LockedUdpSocket, tx: mpsc::Sender<Event>) -> JoinHandle<Event> {
+    fn message_handler(socket: LockedUdpSocket, tx: Sender<Event>) -> JoinHandle<Event> {
         thread::spawn(move || {
             loop {
                 let mut buffer = [0u8; 512];
@@ -193,8 +194,85 @@ impl Client {
         })
     }
 
+    fn next<T: EventHandler>(
+        &mut self,
+        rx: &Receiver<Event>,
+        socket_ref: &LockedUdpSocket,
+        handler: &T
+    ) {
+        match rx.recv() {
+            Ok(mut evt) => {
+                match &mut evt {
+                    Event::PlayerBroadcast(player) => {
+                        match self.state().write() {
+                            Ok(mut state) => {
+                                if let Some(address) = find_interface(player.address()) {
+                                    if state.is_discovery() == false && state.players().len() >= 2 {
+                                        self.initiate_discovery(handler, &mut state, &address);
+                                    }
+                                    state.set_address(address);
+                                }
+
+                                // Always update player on broadcast events.
+                                // DJs might configure their players during performances.
+                                state.players.add_or_update(player.to_owned());
+                            },
+                            Err(_) => {}
+                        }
+                    },
+                    Event::PlayerLinkingWaiting(player) => {
+                        match socket_ref.lock() {
+                            Ok(socket) => {
+                                let mut payload = vec![];
+                                payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
+                                payload.extend(vec![0x11]);
+                                payload.extend(&APPLICATION_NAME.to_vec());
+                                payload.extend(vec![0x01, 0x01, 0x11]);
+                                payload.extend(vec![
+                                    0x01,0x04,0x11,0x01,0x00,0x00,
+                                    0x00,0x4a,0x00,0x6f,0x00,0x6e,
+                                    0x00,0x61,0x00,0x73,0x00,0x73,
+                                    0x00,0x2d,0x00,0x4d,0x00,0x42,
+                                    0x00,0x50,0x00,0x2d,0x00,0x32
+                                ]);
+                                payload.extend(vec![0x00; 232]);
+
+                                match socket.send_to(
+                                    payload.as_slice().as_ref(),
+                                    (player.address(), 50002)
+                                ) {
+                                    Ok(nob) => {
+                                        eprintln!("sent package to player with bytes: {}", nob);
+                                        match self.state().write() {
+                                            Ok(mut state) => {
+                                                player.set_linking(true);
+                                                state.players.add_or_update(player.to_owned());
+                                            },
+                                            Err(err) => {
+                                                eprintln!("{}", err.to_string());
+                                            },
+                                        }
+                                    },
+                                    _ => {},
+                                }
+                            },
+                            Err(_) => {},
+                        }
+                    },
+                    _ => {},
+                }
+
+                // Filter out our own broadcasts
+                if evt != Event::ApplicationBroadcast {
+                    handler.on_event(evt);
+                }
+            },
+            Err(_) => {},
+        };
+    }
+
     pub fn run<T: EventHandler>(&mut self, handler: &T) -> Result<(), Error> {
-        let (tx, rx) = mpsc::channel::<event::Event>();
+        let (tx, rx) = mpsc::channel::<Event>();
 
         let socket = UdpSocket::bind(("0.0.0.0", 50000))
             .map_err(|err| Error::Socket(format!("{}", err)))?;
@@ -218,79 +296,12 @@ impl Client {
         let _portmap_handler = Self::portmap_handler();
 
         loop {
-            match rx.recv() {
-                Ok(mut evt) => {
-                    match &mut evt {
-                        Event::PlayerBroadcast(player) => {
-                            match self.state().write() {
-                                Ok(mut state) => {
-                                    if let Some(address) = find_interface(player.address()) {
-                                        if state.is_discovery() == false && state.players().len() >= 2 {
-                                            self.initiate_discovery(handler, &mut state, &address);
-                                        }
-                                        state.set_address(address);
-                                    }
-
-                                    // Always update player on broadcast events.
-                                    // DJs might configure their players during performances.
-                                    state.players.add_or_update(player.to_owned());
-                                },
-                                Err(_) => {}
-                            }
-                        },
-                        Event::PlayerLinkingWaiting(player) => {
-                            match message_socket_ref.lock() {
-                                Ok(socket) => {
-                                    let mut payload = vec![];
-                                    payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
-                                    payload.extend(vec![0x11]);
-                                    payload.extend(&APPLICATION_NAME.to_vec());
-                                    payload.extend(vec![0x01, 0x01, 0x11]);
-                                    payload.extend(vec![
-                                        0x01,0x04,0x11,0x01,0x00,0x00,
-                                        0x00,0x4a,0x00,0x6f,0x00,0x6e,
-                                        0x00,0x61,0x00,0x73,0x00,0x73,
-                                        0x00,0x2d,0x00,0x4d,0x00,0x42,
-                                        0x00,0x50,0x00,0x2d,0x00,0x32
-                                    ]);
-                                    payload.extend(vec![0x00; 232]);
-
-                                    match socket.send_to(
-                                        payload.as_slice().as_ref(),
-                                        (player.address(), 50002)
-                                    ) {
-                                        Ok(nob) => {
-                                            eprintln!("sent package to player with bytes: {}", nob);
-                                            match self.state().write() {
-                                                Ok(mut state) => {
-                                                    player.set_linking(true);
-                                                    state.players.add_or_update(player.to_owned());
-                                                },
-                                                Err(err) => {
-                                                    eprintln!("{}", err.to_string());
-                                                },
-                                            }
-                                        },
-                                        _ => {},
-                                    }
-                                },
-                                Err(_) => {},
-                            }
-                        },
-                        _ => (),
-                    }
-
-                    if evt != Event::ApplicationBroadcast {
-                        handler.on_event(evt);
-                    }
-                },
-                Err(_) => {},
-            }
+            self.next(&rx, &message_socket_ref, handler);
             thread::sleep(Duration::from_millis(300));
         }
     }
 
-    fn event_parser(buffer: &[u8], metadata: (usize, SocketAddr), sender: &mpsc::Sender<Event>) {
+    fn event_parser(buffer: &[u8], metadata: (usize, SocketAddr), sender: &Sender<Event>) {
         sender.send(EventParser::parse(&buffer[..metadata.0], metadata)).unwrap();
     }
 }
