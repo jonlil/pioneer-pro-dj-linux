@@ -1,3 +1,6 @@
+extern crate byteorder;
+
+use byteorder::{WriteBytesExt, BigEndian};
 use std::sync::{Arc, RwLock};
 use std::ops::RangeInclusive;
 use super::util::clone_into_array;
@@ -6,8 +9,6 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use std::net::{UdpSocket, SocketAddr};
 use std::io;
-use crate::utils::network::PioneerNetwork;
-
 
 type RPCPropertyValue = [u8; 4];
 
@@ -50,24 +51,21 @@ impl RPCServer {
     pub fn run(&self) {
         // TODO: implement rpc callback ports pool
         thread::spawn(move || {
-            let socket = UdpSocket::bind(("0.0.0.0", 50111)).unwrap();
+            // TODO: read address from shared state
+            let mut socket = UdpSocket::bind(("0.0.0.0", 50111)).unwrap();
+            socket.set_nonblocking(true).unwrap();
+
             let mut socket_port_offset = 0;
 
             loop {
                 let mut buffer = [0u8; 512];
                 match socket.recv_from(&mut buffer) {
-                    Ok((number_of_bytes, source)) => {
+                    Ok((_number_of_bytes, source)) => {
                         match parse_rpc_message(&buffer) {
                             Ok(event) => {
                                 match event {
-                                    RPC::Portmap(rpc_call, portmap) => {
-
-                                        match socket.send_to(&[
-                                                0x00,
-                                            ], source) {
-                                            Ok(nob) => eprintln!("reply: {:?}", nob),
-                                            Err(err) => eprintln!("{:?}", err.to_string()),
-                                        }
+                                    RPC::Portmap(rpc_call, _portmap) => {
+                                        Self::create_response_handler(rpc_call, &source);
                                     }
                                 }
                             },
@@ -82,13 +80,35 @@ impl RPCServer {
     }
 
     // This method should have access to adding events to the event loop
-    pub fn create_response_socket(network: &PioneerNetwork) {
-        unimplemented!();
+    pub fn create_response_handler(call: RPCCall, receiver: &SocketAddr) {
+        let port_number: u16 = 4567;
+        let socket = UdpSocket::bind(("0.0.0.0", port_number)).unwrap();
 
-        //thread::spawn(move || {
-        //    let socket = UdpSocket::bind((network.ip(), 
-        //    
-        //});
+        let data: Vec<u8> = vec![
+            call.xid.to_vec(),
+            call.message_type.to_vec(),
+            [0u8; 4].to_vec(),
+            [0u8; 4].to_vec(),
+            [0u8; 4].to_vec(),
+            [0u8; 4].to_vec(),
+            vec![0x00, 0x00], convert_u16_to_two_u8s_be(port_number),
+        ].into_iter().flatten().collect();
+
+        match socket.send_to(data.as_ref(), receiver) {
+            Ok(nob) => eprintln!("{:?}", nob),
+            Err(error) => eprintln!("{:?}", error),
+        }
+
+        thread::spawn(move || {
+            socket.set_read_timeout(Some(Duration::from_millis(2000)));
+            let mut buffer = [0u8; 512];
+            match socket.recv(&mut buffer) {
+                Ok(number_of_bytes) => {
+                    eprintln!("{:?}", buffer[..number_of_bytes].as_ref());
+                },
+                Err(error) => eprintln!("{:?}", error.to_string()),
+            }
+        });
     }
 }
 
@@ -220,6 +240,12 @@ pub fn parse_rpc_message(message: &[u8]) -> Result<RPC, &'static str> {
             Err("Err")
         },
     }
+}
+
+fn convert_u16_to_two_u8s_be(integer: u16) -> Vec<u8> {
+    let mut res = vec![];
+    res.write_u16::<BigEndian>(integer).unwrap();
+    res
 }
 
 #[cfg(test)]
