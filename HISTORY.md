@@ -2,6 +2,12 @@
 
 In this file I will try to add important milestones/achievements in a happy format.
 
+#### 2019-03-24
+Current state of this project is that players have started to respond to commnication.
+I'm currently working on implementing the RPC server. Some work has been made on
+analyzing how that communication looks like. A first naive implementation should
+not be super far away.
+
 #### 2019-03-14
 General cleaning and re-arranging code. Also renamed to project to `TermDJ`.
 Name is short for Terminal DJ.
