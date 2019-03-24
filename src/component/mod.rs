@@ -35,9 +35,7 @@ impl App {
             match rx.recv() {
                 Ok(evnt) => {
                     match &evnt {
-                        RekordboxEvent::PlayerBroadcast(player) => {
-                            eprintln!("{:?}", player);
-                        }
+                        RekordboxEvent::PlayerBroadcast(player) => {}
                         _ => {}
                     }
                 }
