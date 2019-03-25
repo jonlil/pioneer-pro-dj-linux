@@ -10,7 +10,7 @@ use rand::Rng;
 
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
-use crate::rekordbox::event::{self, Event, EventHandler as EventParser};
+use super::event::{self, Event, EventParser};
 use crate::rekordbox::player::{PlayerCollection};
 use crate::rekordbox::{APPLICATION_NAME, SOFTWARE_IDENTIFICATION};
 use super::rpc::{RPC, parse_rpc_message, RPCServer};
