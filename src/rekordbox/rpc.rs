@@ -1,14 +1,17 @@
 extern crate byteorder;
 
 use byteorder::{WriteBytesExt, BigEndian};
-use std::sync::{Arc, RwLock};
+use std::io::ErrorKind;
+use std::io;
+use std::net::{UdpSocket, SocketAddr};
 use std::ops::RangeInclusive;
-use super::util::clone_into_array;
-use super::client::ClientState;
+use std::sync::{Arc, RwLock, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use std::net::{UdpSocket, SocketAddr};
-use std::io;
+
+use super::util::clone_into_array;
+use super::client::ClientState;
+use super::rpc_socket_pool::{Pool, PooledPort};
 
 type RPCPropertyValue = [u8; 4];
 
@@ -38,24 +41,26 @@ enum RPCProgram {
     Unknown,
 }
 
+
+
 pub struct RPCServer {
     state: Arc<RwLock<ClientState>>,
+    port_pool: Pool,
 }
 impl RPCServer {
     pub fn new(state: Arc<RwLock<ClientState>>) -> Self {
         Self {
             state: state,
+            port_pool: Pool::new(4096..=4104).unwrap(),
         }
     }
 
     pub fn run(&self) {
-        // TODO: implement rpc callback ports pool
+        let port_pool = self.port_pool.clone();
         thread::spawn(move || {
             // TODO: read address from shared state
             let mut socket = UdpSocket::bind(("0.0.0.0", 50111)).unwrap();
             socket.set_nonblocking(true).unwrap();
-
-            let mut socket_port_offset = 0;
 
             loop {
                 let mut buffer = [0u8; 512];
@@ -65,14 +70,22 @@ impl RPCServer {
                             Ok(event) => {
                                 match event {
                                     RPC::Portmap(rpc_call, _portmap) => {
-                                        Self::create_response_handler(rpc_call, &source);
+                                        Self::create_response_handler(
+                                            rpc_call,
+                                            &socket,
+                                            &source,
+                                            port_pool.get().unwrap()
+                                        );
                                     }
                                 }
                             },
                             Err(_) => {},
                         }
                     },
-                    Err(err) => eprintln!("{:?}", err)
+                    Err(ref err) if err.kind() != ErrorKind::WouldBlock => {
+                        println!("Something went wrong: {}", err)
+                    },
+                    _ => {},
                 }
                 thread::sleep(Duration::from_millis(300));
             }
@@ -80,18 +93,23 @@ impl RPCServer {
     }
 
     // This method should have access to adding events to the event loop
-    pub fn create_response_handler(call: RPCCall, receiver: &SocketAddr) {
-        let port_number: u16 = 4567;
-        let socket = UdpSocket::bind(("0.0.0.0", port_number)).unwrap();
+    pub fn create_response_handler(
+        call: RPCCall,
+        socket: &UdpSocket,
+        receiver: &SocketAddr,
+        reply_port: PooledPort, 
+    ) {
+        eprintln!("{:?}", reply_port.get_port());
+        let allocated_socket = UdpSocket::bind(("0.0.0.0", reply_port.get_port())).unwrap();
 
         let data: Vec<u8> = vec![
             call.xid.to_vec(),
-            call.message_type.to_vec(),
+            [0x00, 0x00, 0x00, 0x01].to_vec(),
             [0u8; 4].to_vec(),
             [0u8; 4].to_vec(),
             [0u8; 4].to_vec(),
             [0u8; 4].to_vec(),
-            vec![0x00, 0x00], convert_u16_to_two_u8s_be(port_number),
+            vec![0x00, 0x00], convert_u16_to_two_u8s_be(reply_port.get_port()),
         ].into_iter().flatten().collect();
 
         match socket.send_to(data.as_ref(), receiver) {
@@ -100,11 +118,11 @@ impl RPCServer {
         }
 
         thread::spawn(move || {
-            socket.set_read_timeout(Some(Duration::from_millis(2000)));
+            allocated_socket.set_read_timeout(Some(Duration::from_millis(2000))).unwrap();
             let mut buffer = [0u8; 512];
-            match socket.recv(&mut buffer) {
+            match allocated_socket.recv(&mut buffer) {
                 Ok(number_of_bytes) => {
-                    eprintln!("{:?}", buffer[..number_of_bytes].as_ref());
+                    eprintln!("Got RPC data: {:?}", buffer[..number_of_bytes].as_ref());
                 },
                 Err(error) => eprintln!("{:?}", error.to_string()),
             }

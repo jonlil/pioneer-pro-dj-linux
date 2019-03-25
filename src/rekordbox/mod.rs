@@ -16,3 +16,4 @@ pub mod player;
 mod rpc;
 mod message;
 mod util;
+mod rpc_socket_pool;

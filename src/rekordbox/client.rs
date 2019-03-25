@@ -130,6 +130,7 @@ impl Client {
                 Ok(socket_metadata) => Self::event_parser(&buffer, socket_metadata, &tx),
                 Err(_) => (),
             }
+            thread::sleep(Duration::from_millis(250));
         })
     }
 
