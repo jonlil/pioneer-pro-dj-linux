@@ -13,7 +13,8 @@ use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
 use crate::rekordbox::player::{PlayerCollection};
 use crate::rekordbox::{APPLICATION_NAME, SOFTWARE_IDENTIFICATION};
-use super::rpc::{RPC, parse_rpc_message, RPCServer};
+use super::rpc::EventHandler as RPCEventHandler;
+use crate::rpc::server::{RPCServer};
 
 pub enum Error {
     Generic(String),
@@ -179,9 +180,12 @@ impl Client {
 
     // TODO: Break out this to RPC::Server
     // RPC::Server should have it's own EventLoop
-    fn portmap_handler(state: LockedClientState) {
-        let server = RPCServer::new(state);
-        server.run();
+    fn rpc_server_handler() {
+        thread::spawn(move || {
+            let server = RPCServer::new();
+            let handler = RPCEventHandler::new();
+            server.run(handler);
+        });
     }
 
     fn next<T: EventHandler>(
@@ -283,7 +287,7 @@ impl Client {
         // This handler is responsible for reading packages arriving on port 50002
         let _message_handler = Self::message_handler(message_socket_ref.clone(), tx.clone());
 
-        let _portmap_handler = Self::portmap_handler(self.state());
+        let _rpc_server_handler = Self::rpc_server_handler();
 
         loop {
             self.next(&rx, &message_socket_ref, handler);
