@@ -14,8 +14,8 @@ pub enum Event {
     Tick,
 }
 
-pub struct EventHandler;
-impl EventHandler {
+pub struct EventParser;
+impl EventParser {
     pub fn is_rekordbox_event(data: &[u8]) -> bool {
         if data.len() < SOFTWARE_IDENTIFICATION.len() {
             return false
@@ -70,7 +70,7 @@ impl EventHandler {
 mod tests {
     use crate::rekordbox::event::{
         Event,
-        EventHandler
+        EventParser
     };
     use crate::rekordbox::{
         player::Player,
@@ -95,8 +95,8 @@ mod tests {
 
     #[test]
     fn it_should_identify_rekordbox_in_network() {
-        assert_eq!(EventHandler::is_rekordbox_event(&[0x00, 0x01]), false);
-        assert_eq!(EventHandler::is_rekordbox_event(&SOFTWARE_IDENTIFICATION), true);
+        assert_eq!(EventParser::is_rekordbox_event(&[0x00, 0x01]), false);
+        assert_eq!(EventParser::is_rekordbox_event(&SOFTWARE_IDENTIFICATION), true);
     }
 
     #[test]
@@ -104,7 +104,7 @@ mod tests {
         let mut payload: Vec<u8> = Vec::with_capacity(13);
         payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
         payload.extend(vec![0x00, 0x00, 0x00]);
-        assert_eq!(EventHandler::get_type(&payload, get_socket_metadata(13)), Event::Unknown);
+        assert_eq!(EventParser::get_type(&payload, get_socket_metadata(13)), Event::Unknown);
     }
 
     #[test]
@@ -121,7 +121,7 @@ mod tests {
             0x00
         ]);
         assert_eq!(payload.as_slice().len(), 54);
-        assert_eq!(EventHandler::get_type(&payload, get_socket_metadata(54)), Event::PlayerBroadcast(Player::new(
+        assert_eq!(EventParser::get_type(&payload, get_socket_metadata(54)), Event::PlayerBroadcast(Player::new(
             str::from_utf8(&MOCKED_PLAYER_NAME[..]).unwrap().trim_end_matches('\u{0}').to_string(),
             0x03,
             IpAddr::V4(Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4)),
@@ -143,7 +143,7 @@ mod tests {
             0x00
         ]);
         assert_eq!(payload.as_slice().len(), 54);
-        assert_eq!(EventHandler::get_type(&payload, get_socket_metadata(54)), Event::ApplicationBroadcast);
+        assert_eq!(EventParser::get_type(&payload, get_socket_metadata(54)), Event::ApplicationBroadcast);
     }
 
     #[test]
@@ -154,7 +154,7 @@ mod tests {
         payload.extend(&MOCKED_PLAYER_NAME.to_vec());
         payload.extend(vec![0x01, 0x00, 0x01, 0x00, 0x00]);
         assert_eq!(payload.as_slice().len(), 36);
-        assert_eq!(EventHandler::get_type(&payload, get_socket_metadata(36)), Event::PlayerLinkingWaiting(Player::new(
+        assert_eq!(EventParser::get_type(&payload, get_socket_metadata(36)), Event::PlayerLinkingWaiting(Player::new(
             str::from_utf8(&MOCKED_PLAYER_NAME[..]).unwrap().trim_end_matches('\u{0}').to_string(),
             0x01,
             IpAddr::V4(Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4)),

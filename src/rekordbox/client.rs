@@ -10,9 +10,10 @@ use rand::Rng;
 
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
-use crate::rekordbox::event::{self, Event, EventHandler as EventParser};
+use super::event::{self, Event, EventParser};
 use crate::rekordbox::player::{PlayerCollection};
 use crate::rekordbox::{APPLICATION_NAME, SOFTWARE_IDENTIFICATION};
+use super::rpc::{RPC, parse_rpc_message, RPCServer};
 
 pub enum Error {
     Generic(String),
@@ -129,6 +130,7 @@ impl Client {
                 Ok(socket_metadata) => Self::event_parser(&buffer, socket_metadata, &tx),
                 Err(_) => (),
             }
+            thread::sleep(Duration::from_millis(250));
         })
     }
 
@@ -175,23 +177,11 @@ impl Client {
         })
     }
 
-    fn portmap_handler() -> JoinHandle<Event> {
-        thread::spawn(move || {
-            let socket = UdpSocket::bind(("0.0.0.0", 50111)).unwrap();
-
-            loop {
-                let mut buffer = [0u8; 512];
-                match socket.recv_from(&mut buffer) {
-                    Ok((number_of_bytes, _source)) => {
-                        eprintln!(
-                            "portmap package\n{:?}",
-                            String::from_utf8_lossy(&buffer[..number_of_bytes]));
-                    },
-                    Err(err) => eprintln!("{:?}", err)
-                }
-                thread::sleep(Duration::from_millis(300));
-            }
-        })
+    // TODO: Break out this to RPC::Server
+    // RPC::Server should have it's own EventLoop
+    fn portmap_handler(state: LockedClientState) {
+        let server = RPCServer::new(state);
+        server.run();
     }
 
     fn next<T: EventHandler>(
@@ -293,7 +283,7 @@ impl Client {
         // This handler is responsible for reading packages arriving on port 50002
         let _message_handler = Self::message_handler(message_socket_ref.clone(), tx.clone());
 
-        let _portmap_handler = Self::portmap_handler();
+        let _portmap_handler = Self::portmap_handler(self.state());
 
         loop {
             self.next(&rx, &message_socket_ref, handler);
