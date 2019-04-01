@@ -1,6 +1,7 @@
 mod rekordbox;
 mod utils;
 mod component;
+mod rpc;
 
 extern crate rand;
 extern crate pnet;

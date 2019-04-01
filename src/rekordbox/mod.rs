@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 // TODO: Make private
 pub const SOFTWARE_IDENTIFICATION: [u8; 10] = [
     0x51,0x73,0x70,0x74,0x31,0x57,0x6d,0x4a,0x4f,0x4c
@@ -11,9 +13,9 @@ pub const APPLICATION_NAME: [u8; 20] = [
 pub mod client;
 pub mod event;
 pub mod player;
+pub mod rpc_socket_pool;
+pub mod util;
 
 // Internal mods
-mod rpc;
 mod message;
-mod util;
-mod rpc_socket_pool;
+mod rpc;

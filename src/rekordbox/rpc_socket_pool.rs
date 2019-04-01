@@ -1,10 +1,7 @@
 extern crate parking_lot;
 
-use std::error;
-use std::fmt;
-use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant};
+use std::ops::{Deref};
+use std::sync::{Arc};
 use parking_lot::{Mutex, MutexGuard};
 
 #[derive(Debug)]
