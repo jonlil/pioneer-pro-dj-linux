@@ -16,6 +16,7 @@ use crate::rekordbox::{APPLICATION_NAME, SOFTWARE_IDENTIFICATION};
 use super::rpc::EventHandler as RPCEventHandler;
 use crate::rpc::server::{RPCServer};
 
+#[derive(Debug)]
 pub enum Error {
     Generic(String),
     Socket(String),
@@ -83,7 +84,7 @@ impl ClientState {
     }
 }
 
-type LockedClientState = Arc<RwLock<ClientState>>;
+pub type LockedClientState = Arc<RwLock<ClientState>>;
 type LockedUdpSocket = Arc<Mutex<UdpSocket>>;
 
 pub trait EventHandler {
@@ -180,11 +181,12 @@ impl Client {
 
     // TODO: Break out this to RPC::Server
     // RPC::Server should have it's own EventLoop
-    fn rpc_server_handler() {
+    fn rpc_server_handler(state_ref: LockedClientState) {
         thread::spawn(move || {
-            let server = RPCServer::new();
-            let handler = RPCEventHandler::new();
-            server.run(handler);
+            let server = RPCServer::new(RPCEventHandler::new(state_ref));
+
+            // Start RPC server
+            server.run();
         });
     }
 
@@ -276,7 +278,7 @@ impl Client {
         // This handler is responsible for reading packages arriving on port 50002
         let _message_handler = Self::message_handler(message_socket_ref.clone(), tx.clone());
 
-        let _rpc_server_handler = Self::rpc_server_handler();
+        let _rpc_server_handler = Self::rpc_server_handler(self.state());
 
         loop {
             self.next(&rx, &message_socket_ref, handler);

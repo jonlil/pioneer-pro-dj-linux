@@ -24,6 +24,10 @@ impl PioneerNetwork {
         self.network.ip()
     }
 
+    pub fn mask(&self) -> IpAddr {
+        self.network.mask()
+    }
+
     pub fn mac_address(&self) -> MacAddr {
         self.mac
     }

@@ -258,6 +258,31 @@ pub struct RPCCall {
     verifier: RPCVerifier,
 }
 
+impl RPCCall {
+    pub fn to_reply(&self, payload: Vec<Vec<u8>>) -> Vec<u8> {
+        let mut data: Vec<Vec<u8>> = vec![
+            self.xid.to_vec(),
+            // Message type
+            [0x00, 0x00, 0x00, 0x01].to_vec(),
+            // Reply state
+            [0u8; 4].to_vec(),
+
+            // Verifier
+            [0u8; 4].to_vec(),
+            [0u8; 4].to_vec(),
+
+            // Accept state
+            [0u8; 4].to_vec(),
+        ];
+
+        for chunk in payload {
+            data.push(chunk);
+        }
+
+        data.into_iter().flatten().collect()
+    }
+}
+
 /// RPC data types
 
 #[derive(Debug, PartialEq)]

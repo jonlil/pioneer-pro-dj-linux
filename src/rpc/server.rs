@@ -12,28 +12,26 @@ use std::sync::Arc;
 pub struct RPCServer {
     port_pool: Pool,
     socket: UdpSocket,
+    handler: Arc<EventHandler>,
 }
 
 pub trait EventHandler: Send + Sync + 'static {
-    fn on_event(&self, name: &str, rpc_program: RPC) -> Option<RPCReply>;
+    fn on_event(&self, name: &str, socket: &UdpSocket, receiver: SocketAddr, rpc_program: RPC);
 }
 
 impl RPCServer {
-    pub fn new() -> Self {
+    pub fn new<T: EventHandler>(handler: T) -> Self {
         Self {
             port_pool: Pool::new(4096..=4104).unwrap(),
             socket: UdpSocket::bind(("0.0.0.0", 50111)).unwrap(),
+            handler: Arc::new(handler),
         }
     }
 
-    pub fn run<T: EventHandler>(&self, handler: T) {
-        let handler_ref = Arc::new(handler);
-
+    pub fn run(&self) {
         loop {
-            // We should only receive portmapping events here.
-            // This should be routed to the correct module.
             match self.recv() {
-                Ok((rpc_call, source)) => self.portmap_router(rpc_call, source, handler_ref.clone()),
+                Ok((rpc_call, source)) => self.portmap_router(rpc_call, source),
                 Err(err) => eprintln!("{:?}", err.to_string()),
             }
 
@@ -41,17 +39,16 @@ impl RPCServer {
         }
     }
 
-    fn portmap_router<T: EventHandler>(
+    fn portmap_router(
         &self,
         call: RPC,
         receiver: SocketAddr,
-        handler: Arc<T>,
     ) {
         match call {
             RPC::Portmap(rpc_call, Portmap::Program::Getport(program)) => {
                 match program {
-                    Portmap::Procedure::Mount(portmap) => {
-                        self.create_response_handler(rpc_call, receiver, handler);
+                    Portmap::Procedure::Mount(_portmap) => {
+                        self.create_response_handler(rpc_call, receiver);
                     },
                     Portmap::Procedure::NFS(portmap) => {
                         eprintln!("Portmapping NFS: {:?}", portmap);
@@ -75,47 +72,61 @@ impl RPCServer {
         }
     }
 
-    pub fn create_response_handler<T: EventHandler>(
-        &self,
-        call: RPCCall,
-        receiver: SocketAddr,
-        handler: Arc<T>,
-    ) {
-        let reply_port = self.port_pool.get().unwrap();
-        let allocated_socket = UdpSocket::bind(("0.0.0.0", reply_port.get_port())).unwrap();
-        let data: Vec<u8> = vec![
-            call.xid.to_vec(),
-            [0x00, 0x00, 0x00, 0x01].to_vec(),
-            [0u8; 4].to_vec(),
-            [0u8; 4].to_vec(),
-            [0u8; 4].to_vec(),
-            [0u8; 4].to_vec(),
-            vec![0x00, 0x00], convert_u16_to_two_u8s_be(reply_port.get_port()),
-        ].into_iter().flatten().collect();
-
-        match self.socket.send_to(data.as_ref(), receiver) {
-            Ok(nob) => eprintln!("{:?}", nob),
-            Err(error) => eprintln!("{:?}", error),
+    fn allocate_socket(reply_port: u16) -> Result<UdpSocket, Error> {
+        match UdpSocket::bind(("0.0.0.0", reply_port)) {
+            Ok(socket) => {
+                match socket.set_read_timeout(Some(Duration::from_millis(5000))) {
+                    Ok(_) => Ok(socket),
+                    Err(err) => Err(err),
+                }
+            },
+            Err(err) => Err(err),
         }
+    }
 
+    pub fn create_response_handler(&self, call: RPCCall, receiver: SocketAddr) {
         let _procedure_callback_handler = {
-            thread::spawn(move || {
-                allocated_socket.set_read_timeout(Some(Duration::from_millis(2000))).unwrap();
+            let handler = self.handler.clone();
+            let reply_port = self.port_pool.get().unwrap();
+            let reply = call.to_reply(vec![
+                vec![0x00, 0x00],
+                // TODO: Implement support for le.
+                convert_u16_to_two_u8s_be(reply_port.get_port())
+            ]);
 
-                let mut buffer = [0u8; 512];
-                match allocated_socket.recv(&mut buffer) {
-                    Ok(number_of_bytes) => {
-                        let rpc = RPC::unmarshall(&buffer[..number_of_bytes]);
+            // Possible todo: Implement thread pooling to avoid too many concurrent threads
+            thread::spawn(move || {
+                match Self::allocate_socket(reply_port.get_port()) {
+                    Ok(socket) => PortmapProgramHandler::detect(&socket, |rpc| {
+                        let call_event_handler = |method: &str, rpc: RPC| {
+                            handler.on_event(method, &socket, receiver, rpc);
+                        };
+
                         match &rpc {
-                            RPC::Mount(call, Mount::Procedure::Export(export)) => {
-                                handler.on_event("Export", rpc);
-                            },
+                            RPC::Mount(_call, Mount::Procedure::Export(_export)) => call_event_handler("Export", rpc),
                             _ => {},
-                        }
-                    },
-                    Err(error) => eprintln!("{:?}", error.to_string()),
+                        };
+                    }),
+                    Err(err) => eprintln!("{:?}", err),
                 }
             });
+
+            match self.socket.send_to(reply.as_ref(), receiver) {
+                Ok(nob) => eprintln!("RPC Portmapping accept package sent {:?}", nob),
+                Err(error) => eprintln!("{:?}", error),
+            }
+        };
+    }
+}
+
+struct PortmapProgramHandler;
+impl PortmapProgramHandler {
+    pub fn detect<F>(socket: &UdpSocket, callback: F) where
+        F: FnOnce(RPC) {
+        let mut buffer = [0u8; 512];
+        match socket.recv(&mut buffer) {
+            Ok(bytes) => callback(RPC::unmarshall(&buffer[..bytes])),
+            Err(err) => callback(RPC::Error(err.to_string())),
         };
     }
 }
