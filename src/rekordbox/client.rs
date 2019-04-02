@@ -217,25 +217,14 @@ impl Client {
                     Event::PlayerLinkingWaiting(player) => {
                         match socket_ref.lock() {
                             Ok(socket) => {
-                                let mut payload = vec![];
-                                payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
-                                payload.extend(vec![0x11]);
-                                payload.extend(&APPLICATION_NAME.to_vec());
-                                payload.extend(vec![0x01, 0x01, 0x11]);
-                                payload.extend(vec![
-                                    0x01,0x04,0x11,0x01,0x00,0x00,
-                                    0x00,0x4a,0x00,0x6f,0x00,0x6e,
-                                    0x00,0x61,0x00,0x73,0x00,0x73,
-                                    0x00,0x2d,0x00,0x4d,0x00,0x42,
-                                    0x00,0x50,0x00,0x2d,0x00,0x32
-                                ]);
-                                payload.extend(vec![0x00; 232]);
+                                let message: Vec<u8> = Message::InitiateRPCState::new().into();
 
                                 match socket.send_to(
-                                    payload.as_slice().as_ref(),
-                                    (player.address(), 50002)
+                                    &message.as_ref(),
+                                    (player.address(), 50002),
                                 ) {
                                     Ok(nob) => {
+                                        // This should be a package of 48 bytes
                                         eprintln!("sent package to player with bytes: {}", nob);
                                         match self.state().write() {
                                             Ok(mut state) => {
