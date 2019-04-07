@@ -75,6 +75,8 @@ impl Pool {
         let mut tries: usize = 0;
 
         loop {
+            tries += 1;
+
             match self.try_get_inner(self.0.internals.lock()) {
                 Ok(port) => return Ok(port),
                 Err(i) => {},
@@ -94,7 +96,7 @@ impl Pool {
         &'a self,
         mut internals: MutexGuard<'a, PoolInternals>,
     ) -> Result<PooledPort, &'static str> {
-        if let Some(mut port) = internals.ports.pop() {
+        if let Some(port) = internals.ports.pop() {
             drop(internals);
 
             return Ok(PooledPort {
