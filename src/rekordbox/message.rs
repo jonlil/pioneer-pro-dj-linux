@@ -147,6 +147,49 @@ impl Into<RekordboxMessageType> for ApplicationLinkRequest {
     }
 }
 
+pub struct InitiateRPCState;
+impl InitiateRPCState {
+    pub fn new() -> Self { Self {} }
+}
+
+impl IntoRekordboxMessage for InitiateRPCState {
+    fn compose(&self) -> Vec<RekordboxMessageType> {
+        let mut payload = vec![];
+        payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
+        payload.extend(vec![0x11]);
+        payload.extend(&APPLICATION_NAME.to_vec());
+        payload.extend(vec![0x01, 0x01, 0x11]);
+
+        // Extract hostname
+        payload.extend(vec![
+            0x01,0x04,0x11,0x01,0x00,0x00,
+            0x00,0x4a,0x00,0x6f,0x00,0x6e,
+            0x00,0x61,0x00,0x73,0x00,0x73,
+            0x00,0x2d,0x00,0x4d,0x00,0x42,
+            0x00,0x50,0x00,0x2d,0x00,0x32
+        ]);
+        payload.extend(vec![0x00; 232]);
+
+        vec![payload]
+    }
+}
+
+impl Into<RekordboxMessageType> for InitiateRPCState {
+    fn into(self) -> RekordboxMessageType {
+        self.compose().into_iter().flatten().collect()
+    }
+}
+
 trait IntoRekordboxMessage {
     fn compose(&self) -> Vec<RekordboxMessageType>;
+}
+
+#[cfg(test)]
+mod test {
+    use super::{InitiateRPCState};
+
+    fn initiate_rpc_state_message_package_size() {
+        let message: Vec<u8> = InitiateRPCState::new().into();
+        assert_eq!(message.len(), 48);
+    }
 }

@@ -16,6 +16,7 @@ use crate::rekordbox::{APPLICATION_NAME, SOFTWARE_IDENTIFICATION};
 use super::rpc::EventHandler as RPCEventHandler;
 use crate::rpc::server::{RPCServer};
 
+#[derive(Debug)]
 pub enum Error {
     Generic(String),
     Socket(String),
@@ -83,7 +84,7 @@ impl ClientState {
     }
 }
 
-type LockedClientState = Arc<RwLock<ClientState>>;
+pub type LockedClientState = Arc<RwLock<ClientState>>;
 type LockedUdpSocket = Arc<Mutex<UdpSocket>>;
 
 pub trait EventHandler {
@@ -180,11 +181,12 @@ impl Client {
 
     // TODO: Break out this to RPC::Server
     // RPC::Server should have it's own EventLoop
-    fn rpc_server_handler() {
+    fn rpc_server_handler(state_ref: LockedClientState) {
         thread::spawn(move || {
-            let server = RPCServer::new();
-            let handler = RPCEventHandler::new();
-            server.run(handler);
+            let server = RPCServer::new(RPCEventHandler::new(state_ref));
+
+            // Start RPC server
+            server.run();
         });
     }
 
@@ -217,25 +219,14 @@ impl Client {
                     Event::PlayerLinkingWaiting(player) => {
                         match socket_ref.lock() {
                             Ok(socket) => {
-                                let mut payload = vec![];
-                                payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
-                                payload.extend(vec![0x11]);
-                                payload.extend(&APPLICATION_NAME.to_vec());
-                                payload.extend(vec![0x01, 0x01, 0x11]);
-                                payload.extend(vec![
-                                    0x01,0x04,0x11,0x01,0x00,0x00,
-                                    0x00,0x4a,0x00,0x6f,0x00,0x6e,
-                                    0x00,0x61,0x00,0x73,0x00,0x73,
-                                    0x00,0x2d,0x00,0x4d,0x00,0x42,
-                                    0x00,0x50,0x00,0x2d,0x00,0x32
-                                ]);
-                                payload.extend(vec![0x00; 232]);
+                                let message: Vec<u8> = Message::InitiateRPCState::new().into();
 
                                 match socket.send_to(
-                                    payload.as_slice().as_ref(),
-                                    (player.address(), 50002)
+                                    &message.as_ref(),
+                                    (player.address(), 50002),
                                 ) {
                                     Ok(nob) => {
+                                        // This should be a package of 48 bytes
                                         eprintln!("sent package to player with bytes: {}", nob);
                                         match self.state().write() {
                                             Ok(mut state) => {
@@ -287,7 +278,7 @@ impl Client {
         // This handler is responsible for reading packages arriving on port 50002
         let _message_handler = Self::message_handler(message_socket_ref.clone(), tx.clone());
 
-        let _rpc_server_handler = Self::rpc_server_handler();
+        let _rpc_server_handler = Self::rpc_server_handler(self.state());
 
         loop {
             self.next(&rx, &message_socket_ref, handler);

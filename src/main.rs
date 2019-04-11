@@ -12,7 +12,10 @@ use crate::rekordbox::player::{PlayerCollection};
 fn main() -> Result<(), io::Error> {
     let mut app = component::App {};
 
-    app.run();
+    match app.run() {
+        Ok(_) => {},
+        Err(err) => eprintln!("{:?}", err),
+    }
 
     Ok(())
 }
