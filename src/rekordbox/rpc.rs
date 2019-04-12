@@ -21,7 +21,7 @@ impl EventHandler {
         };
 
         handler.add_callback("Export", rpc_procedure_export);
-        handler.add_callback("MNT", rpc_procedure_mnt);
+        handler.add_callback("Mnt", rpc_procedure_mnt);
 
         handler
     }
@@ -84,7 +84,7 @@ fn rpc_procedure_export(
                     payload.extend(NO_VALUE_FOLLOWS.to_vec());
 
                     match send_rpc_reply(&socket, &receiver, call.to_reply(vec![payload])) {
-                        Ok(nob) => eprintln!("Successfully sent RPC Mount reply with bytes: {}", nob),
+                        Ok(nob) => eprintln!("Successfully sent Mount::Export reply with bytes: {}", nob),
                         Err(_) => {},
                     }
                 }
@@ -98,9 +98,23 @@ fn rpc_procedure_mnt(
     socket: &UdpSocket,
     receiver: SocketAddr,
     rpc_program: RPC,
-    state: &LockedClientState,
+    _state: &LockedClientState,
 ) {
-    vec![0x00, 0x00, 0x00, 0x00];
+    match rpc_program {
+        RPC::Mount(call, _mnt) => {
+            let mut payload: Vec<u8> = vec![];
+            // Status: ok
+            payload.extend(vec![0x00, 0x00, 0x00, 0x00]);
+            // crc-32 file handle..
+            payload.extend([0u8; 32].to_vec());
+
+            match send_rpc_reply(&socket, &receiver, call.to_reply(vec![payload])) {
+                Ok(nob) => eprintln!("Successfully sent Mount::Mnt reply with bytes: {}", nob),
+                Err(_) => {},
+            }
+        },
+        _ => panic!("Invalid RPC Routing"),
+    };
 }
 
 

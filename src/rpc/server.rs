@@ -50,8 +50,8 @@ impl RPCServer {
                     Portmap::Procedure::Mount(_portmap) => {
                         self.create_response_handler(rpc_call, receiver);
                     },
-                    Portmap::Procedure::NFS(portmap) => {
-                        eprintln!("Portmapping NFS: {:?}", portmap);
+                    Portmap::Procedure::NFS(_portmap) => {
+                        self.create_response_handler(rpc_call, receiver);
                     },
                     Portmap::Procedure::Unknown => {},
                 }
@@ -104,7 +104,10 @@ impl RPCServer {
 
                         match &rpc {
                             RPC::Mount(_call, Mount::Procedure::Export(_export)) => call_event_handler("Export", rpc),
-                            _ => {},
+                            RPC::Mount(_call, Mount::Procedure::Mnt(_mnt)) => call_event_handler("Mnt", rpc),
+                            _ => {
+                                eprintln!("Received non-implemented RPC Program: {:?}", rpc);
+                            },
                         };
                     }),
                     Err(err) => eprintln!("{:?}", err),

@@ -106,6 +106,7 @@ pub mod Portmap {
 
 pub mod Mount {
     use super::{RPCProcedure, RPCCall};
+    use crate::rekordbox::util::clone_into_array;
 
     #[derive(Debug, PartialEq)]
     pub enum Procedure {
@@ -114,10 +115,10 @@ pub mod Mount {
         Unknown,
     }
 
-    pub fn unmarshall(rpc_call: &RPCCall, _buffer: &[u8]) -> Procedure {
+    pub fn unmarshall(rpc_call: &RPCCall, buffer: &[u8]) -> Procedure {
         match rpc_call.procedure {
             RPCProcedure::Export => Procedure::Export(Export {}),
-            RPCProcedure::Mnt => Procedure::Mnt(Mnt {}),
+            RPCProcedure::Mnt => Procedure::Mnt(Mnt::unmarshall(&buffer)),
             _ => Procedure::Unknown,
         }
     }
@@ -125,7 +126,17 @@ pub mod Mount {
     #[derive(Debug, PartialEq)]
     pub struct Export;
     #[derive(Debug, PartialEq)]
-    pub struct Mnt;
+    pub struct Mnt {
+        path: [u8; 8],
+    }
+
+    impl Mnt {
+        fn unmarshall(bytes: &[u8]) -> Mnt {
+            Mnt {
+                path: clone_into_array(&bytes[..=7]),
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
