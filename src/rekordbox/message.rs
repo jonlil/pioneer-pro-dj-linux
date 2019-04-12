@@ -1,24 +1,35 @@
-use crate::rekordbox::{
-    SOFTWARE_IDENTIFICATION,
-    APPLICATION_NAME,
-};
+use crate::rekordbox::{SOFTWARE_IDENTIFICATION, APPLICATION_NAME};
 use std::net::IpAddr;
 use crate::utils::network::PioneerNetwork;
 
 pub type RekordboxMessageType = Vec<u8>;
+
+macro_rules! rekordbox_message {
+    ($T:ident) => {
+        pub struct $T;
+        impl $T {
+            pub fn new() -> $T { $T {} }
+        }
+        impl Into<RekordboxMessageType> for $T {
+            fn into(self) -> RekordboxMessageType {
+                self.compose().into_iter().flatten().collect()
+            }
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct ApplicationBroadcast<'a> {
     network: &'a PioneerNetwork,
 }
 
-impl <'a>ApplicationBroadcast<'a> {
+impl<'a> ApplicationBroadcast<'a> {
     pub fn new(network: &'a PioneerNetwork) -> Self {
         Self { network: network }
     }
 }
 
-impl <'a>IntoRekordboxMessage for ApplicationBroadcast<'a> {
+impl<'a> ComposeRekordboxMessage for ApplicationBroadcast<'a> {
     fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
@@ -34,8 +45,7 @@ impl <'a>IntoRekordboxMessage for ApplicationBroadcast<'a> {
         ]
     }
 }
-
-impl <'a>Into<RekordboxMessageType> for ApplicationBroadcast<'a> {
+impl<'a> Into<RekordboxMessageType> for ApplicationBroadcast<'a> {
     fn into(self) -> RekordboxMessageType {
         self.compose().into_iter().flatten().collect()
     }
@@ -46,13 +56,13 @@ pub struct DiscoveryInitial<'a> {
     sequence: u8,
 }
 
-impl <'a>DiscoveryInitial<'a> {
+impl<'a> DiscoveryInitial<'a> {
     pub fn new(network: &'a PioneerNetwork, sequence: u8) -> Self {
         Self { network: network, sequence: sequence }
     }
 }
 
-impl <'a>IntoRekordboxMessage for DiscoveryInitial<'a> {
+impl<'a> ComposeRekordboxMessage for DiscoveryInitial<'a> {
     fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
@@ -63,8 +73,7 @@ impl <'a>IntoRekordboxMessage for DiscoveryInitial<'a> {
         ]
     }
 }
-
-impl <'a>Into<RekordboxMessageType> for DiscoveryInitial<'a> {
+impl<'a> Into<RekordboxMessageType> for DiscoveryInitial<'a> {
     fn into(self) -> RekordboxMessageType {
         self.compose().into_iter().flatten().collect()
     }
@@ -76,7 +85,7 @@ pub struct DiscoverySequence<'a> {
     index: i32,
 }
 
-impl <'a>DiscoverySequence<'a> {
+impl<'a> DiscoverySequence<'a> {
     pub fn new(network: &'a PioneerNetwork, sequence: u8, index: i32) -> Self {
         Self { network: network, sequence: sequence, index: index }
     }
@@ -98,9 +107,15 @@ impl <'a>DiscoverySequence<'a> {
     }
 }
 
+impl<'a> Into<RekordboxMessageType> for DiscoverySequence<'a> {
+    fn into(self) -> RekordboxMessageType {
+        self.compose().into_iter().flatten().collect()
+    }
+}
+
 // TODO: Possible performance fix here is to reuse this struct instead of composing
 // new ones for each of these 36 messages.
-impl <'a>IntoRekordboxMessage for DiscoverySequence<'a> {
+impl<'a> ComposeRekordboxMessage for DiscoverySequence<'a> {
     fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
@@ -118,18 +133,8 @@ impl <'a>IntoRekordboxMessage for DiscoverySequence<'a> {
     }
 }
 
-impl <'a>Into<RekordboxMessageType> for DiscoverySequence<'a> {
-    fn into(self) -> RekordboxMessageType {
-        self.compose().into_iter().flatten().collect()
-    }
-}
-
-pub struct ApplicationLinkRequest;
-impl ApplicationLinkRequest {
-    pub fn new() -> Self { Self {} }
-}
-
-impl IntoRekordboxMessage for ApplicationLinkRequest {
+rekordbox_message!(ApplicationLinkRequest);
+impl ComposeRekordboxMessage for ApplicationLinkRequest {
     fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             SOFTWARE_IDENTIFICATION.to_vec(),
@@ -141,18 +146,8 @@ impl IntoRekordboxMessage for ApplicationLinkRequest {
     }
 }
 
-impl Into<RekordboxMessageType> for ApplicationLinkRequest {
-    fn into(self) -> RekordboxMessageType {
-        self.compose().into_iter().flatten().collect()
-    }
-}
-
-pub struct InitiateRPCState;
-impl InitiateRPCState {
-    pub fn new() -> Self { Self {} }
-}
-
-impl IntoRekordboxMessage for InitiateRPCState {
+rekordbox_message!(InitiateRPCState);
+impl ComposeRekordboxMessage for InitiateRPCState {
     fn compose(&self) -> Vec<RekordboxMessageType> {
         let mut payload = vec![];
         payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
@@ -160,7 +155,7 @@ impl IntoRekordboxMessage for InitiateRPCState {
         payload.extend(&APPLICATION_NAME.to_vec());
         payload.extend(vec![0x01, 0x01, 0x11]);
 
-        // Extract hostname
+        // TODO: Extract computer hostname
         payload.extend(vec![
             0x01,0x04,0x11,0x01,0x00,0x00,
             0x00,0x4a,0x00,0x6f,0x00,0x6e,
@@ -174,18 +169,8 @@ impl IntoRekordboxMessage for InitiateRPCState {
     }
 }
 
-impl Into<RekordboxMessageType> for InitiateRPCState {
-    fn into(self) -> RekordboxMessageType {
-        self.compose().into_iter().flatten().collect()
-    }
-}
-
-pub struct AcknowledgeSuccessfulLinking;
-impl AcknowledgeSuccessfulLinking {
-    pub fn new() -> Self { Self {} }
-}
-
-impl IntoRekordboxMessage for AcknowledgeSuccessfulLinking {
+rekordbox_message!(AcknowledgeSuccessfulLinking);
+impl ComposeRekordboxMessage for AcknowledgeSuccessfulLinking {
     fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
             vec![
@@ -206,13 +191,7 @@ impl IntoRekordboxMessage for AcknowledgeSuccessfulLinking {
     }
 }
 
-impl Into<RekordboxMessageType> for AcknowledgeSuccessfulLinking {
-    fn into(self) -> RekordboxMessageType {
-        self.compose().into_iter().flatten().collect()
-    }
-}
-
-trait IntoRekordboxMessage {
+trait ComposeRekordboxMessage {
     fn compose(&self) -> Vec<RekordboxMessageType>;
 }
 
