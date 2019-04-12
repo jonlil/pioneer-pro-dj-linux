@@ -244,6 +244,18 @@ impl Client {
                             Err(_) => {},
                         }
                     },
+                    Event::PlayerAcceptedMount(receiver) => {
+                        let message: Vec<u8> = Message::AcknowledgeSuccessfulLinking::new().into();
+                        match socket_ref.lock() {
+                            Ok(socket) => {
+                                match socket.send_to(&message.as_ref(), (receiver.ip(), 50002)) {
+                                    Ok(nob) => {},
+                                    Err(err) => {},
+                                };
+                            },
+                            Err(err) => {},
+                        }
+                    },
                     _ => {},
                 }
 
