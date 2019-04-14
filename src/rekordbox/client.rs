@@ -12,7 +12,6 @@ use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
 use crate::rekordbox::player::{PlayerCollection};
-use crate::rekordbox::{APPLICATION_NAME, SOFTWARE_IDENTIFICATION};
 use super::rpc::EventHandler as RPCEventHandler;
 use crate::rpc::server::{RPCServer};
 
@@ -102,6 +101,10 @@ impl Client {
         }
     }
 
+    pub fn state(&self) -> LockedClientState {
+        self.state.clone()
+    }
+
     pub fn initiate_discovery<T: EventHandler>(&self, handler: &T, state: &mut ClientState, address: &PioneerNetwork) {
         state.set_discovery(true);
         handler.on_event(event::Event::InitiateLink);
@@ -117,10 +120,6 @@ impl Client {
             }
         }
         random_broadcast_socket(&address, Message::ApplicationBroadcast::new(&address).into());
-    }
-
-    pub fn state(&self) -> LockedClientState {
-        self.state.clone()
     }
 
     fn broadcast_handler(socket: UdpSocket, tx: &Sender<Event>) -> JoinHandle<()> {
@@ -203,7 +202,7 @@ impl Client {
                         match self.state().write() {
                             Ok(mut state) => {
                                 if let Some(address) = find_interface(player.address()) {
-                                    if state.is_discovery() == false && state.players().len() >= 2 {
+                                    if state.is_discovery() == false && state.players().len() >= 1 {
                                         self.initiate_discovery(handler, &mut state, &address);
                                     }
                                     state.set_address(address);
@@ -242,6 +241,18 @@ impl Client {
                                 }
                             },
                             Err(_) => {},
+                        }
+                    },
+                    Event::PlayerAcceptedMount(receiver) => {
+                        let message: Vec<u8> = Message::AcknowledgeSuccessfulLinking::new().into();
+                        match socket_ref.lock() {
+                            Ok(socket) => {
+                                match socket.send_to(&message.as_ref(), (receiver.ip(), 50002)) {
+                                    Ok(_nob) => {},
+                                    Err(_err) => {},
+                                };
+                            },
+                            Err(_err) => {},
                         }
                     },
                     _ => {},

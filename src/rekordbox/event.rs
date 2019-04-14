@@ -5,13 +5,14 @@ use std::str;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
-    PlayerBroadcast(Player),
     ApplicationBroadcast,
-    Unknown,
     Error,
-    PlayerLinkingWaiting(Player),
     InitiateLink,
+    PlayerAcceptedMount(SocketAddr),
+    PlayerBroadcast(Player),
+    PlayerLinkingWaiting(Player),
     Tick,
+    Unknown,
 }
 
 pub struct EventParser;
@@ -53,6 +54,10 @@ impl EventParser {
                 buffer[33],
                 metadata.1.ip(),
             ))
+        } else if number_of_bytes == 48 {
+            // Here we should initiate that the player have accepted the mnt
+            // And that the player should respond with a 192 bytes package
+            return Event::PlayerAcceptedMount(metadata.1);
         }
 
         Event::Unknown

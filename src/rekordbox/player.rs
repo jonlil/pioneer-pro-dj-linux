@@ -1,7 +1,9 @@
-use std::net::{IpAddr, UdpSocket};
+use std::net::{IpAddr, UdpSocket, TcpStream};
 use std::ops::Index;
-use std::io;
+use std::io::{self, Read};
 use crate::rekordbox::message as Message;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct Player {
@@ -23,6 +25,7 @@ impl Player {
     pub fn link(&mut self, socket: &UdpSocket) -> Result<(usize), io::Error> {
         let data: Vec<u8> = Message::ApplicationLinkRequest::new().into();
         self.linking = true;
+        self.connect_library();
         socket.send_to(data.as_ref(), (self.address, 50002))
     }
 
@@ -32,6 +35,29 @@ impl Player {
 
     pub fn set_linking(&mut self, val: bool) {
         self.linking = val;
+    }
+
+    pub fn connect_library(&mut self) {
+        let address = self.address.clone();
+        thread::spawn(move || {
+            let mut stream = TcpStream::connect((address, 12523)).unwrap();
+
+            loop {
+                let mut buffer = [0; 1024];
+                match stream.read(&mut buffer) {
+                    Ok(number_of_bytes) => {
+                        eprintln!(
+                            "Received TCP Package: {:?}",
+                            String::from_utf8_lossy(&buffer[..number_of_bytes])
+                        );
+                    },
+                    Err(err) => eprintln!("TCPError: {:?}", err),
+                }
+
+                thread::sleep(Duration::from_millis(500));
+            }
+        });
+
     }
 }
 
