@@ -14,6 +14,7 @@ use super::event::{self, Event, EventParser};
 use crate::rekordbox::player::{PlayerCollection};
 use super::rpc::EventHandler as RPCEventHandler;
 use crate::rpc::server::{RPCServer};
+use super::library::TcpServer;
 
 #[derive(Debug)]
 pub enum Error {
@@ -178,6 +179,10 @@ impl Client {
         })
     }
 
+    fn library_handler(_state_ref: LockedClientState) {
+        TcpServer::run();
+    }
+
     // TODO: Break out this to RPC::Server
     // RPC::Server should have it's own EventLoop
     fn rpc_server_handler(state_ref: LockedClientState) {
@@ -290,6 +295,7 @@ impl Client {
         let _message_handler = Self::message_handler(message_socket_ref.clone(), tx.clone());
 
         let _rpc_server_handler = Self::rpc_server_handler(self.state());
+        let _library_handler = Self::library_handler(self.state());
 
         loop {
             self.next(&rx, &message_socket_ref, handler);
