@@ -19,3 +19,4 @@ pub mod util;
 // Internal mods
 mod message;
 mod rpc;
+mod library;

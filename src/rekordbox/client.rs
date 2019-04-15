@@ -1,6 +1,6 @@
 extern crate rand;
 
-use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
+use std::net::{UdpSocket, ToSocketAddrs, SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex, RwLock};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
@@ -14,6 +14,7 @@ use super::event::{self, Event, EventParser};
 use crate::rekordbox::player::{PlayerCollection};
 use super::rpc::EventHandler as RPCEventHandler;
 use crate::rpc::server::{RPCServer};
+use super::library::handle_client;
 
 #[derive(Debug)]
 pub enum Error {
@@ -178,6 +179,21 @@ impl Client {
         })
     }
 
+    fn library_handler(state_ref: LockedClientState) {
+        thread::spawn(move || {
+            let listener = TcpListener::bind(("0.0.0.0", 12523)).unwrap();
+
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        handle_client(stream);
+                    },
+                    Err(err) => {},
+                }
+            }
+        });
+    }
+
     // TODO: Break out this to RPC::Server
     // RPC::Server should have it's own EventLoop
     fn rpc_server_handler(state_ref: LockedClientState) {
@@ -290,6 +306,7 @@ impl Client {
         let _message_handler = Self::message_handler(message_socket_ref.clone(), tx.clone());
 
         let _rpc_server_handler = Self::rpc_server_handler(self.state());
+        let _library_handler = Self::library_handler(self.state());
 
         loop {
             self.next(&rx, &message_socket_ref, handler);
