@@ -185,10 +185,22 @@ impl Client {
 
             for stream in listener.incoming() {
                 match stream {
+                    Ok(stream) => handle_client(stream),
+                    Err(err) => eprintln!("{:?}", err),
+                }
+            }
+        });
+
+        thread::spawn(move || {
+            eprintln!("Listening on connections on port: 65312");
+            let listener = TcpListener::bind(("0.0.0.0", 65312)).unwrap();
+
+            for stream in listener.incoming() {
+                match stream {
                     Ok(stream) => {
-                        handle_client(stream);
+                        eprintln!("Received connection from: {:?}", stream);
                     },
-                    Err(err) => {},
+                    Err(err) => eprintln!("{:?}", err),
                 }
             }
         });

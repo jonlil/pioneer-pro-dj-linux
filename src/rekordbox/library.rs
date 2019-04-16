@@ -71,27 +71,30 @@ impl Library {
     }
 }
 
+pub fn send_library_port(mut stream: TcpStream) {
+    match stream.write(Library::start_page().as_ref()) {
+        Ok(what) => eprintln!("Successfully sent message: {:?}", what),
+        Err(err) => eprintln!("{:?}", err),
+    };
+}
+
+pub fn get_package_type(buffer: &[u8]) {
+    match buffer {
+         //0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x44, 0x42, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x00
+         &[0, 0, 0, 15, 82, 101, 109, 111, 116, 101, 68, 66, 83, 101, 114] => eprintln!("Got RemoteDBServer Package"),
+         _ => eprintln!("Got unsupported TCP Package:\n{:?}", buffer),
+    }
+}
 
 pub fn handle_client(mut stream: TcpStream) {
-
-    stream.set_nonblocking(true).expect("set_nonblocking call failed");
-
-    let mut buf = vec![];
-    loop {
-        match stream.read_to_end(&mut buf) {
-            Ok(_) => break,
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                // wait until network socket is ready, typically implemented
-                // via platform-specific APIs such as epoll or IOCP
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(e) => panic!("encountered IO error: {}", e),
-        };
-    };
-
-    eprintln!("{:?}", buf);
-    if buf == vec![0, 0, 0, 15, 82, 101, 109, 111, 116, 101, 68, 66, 83, 101, 114, 118, 101, 114, 0] {
-        eprintln!("Sending start page payload, {:?}", String::from_utf8_lossy(&[0xff, 0x20]));
-        stream.write(Library::start_page().as_ref());
+    let mut buf = [0u8; 64];
+    match stream.read(&mut buf) {
+        Ok(size) => {
+            get_package_type(&buf[..size]);
+            //if size == 19 && buf[..size].to_vec() == vec![0, 0, 0, 15, 82, 101, 109, 111, 116, 101, 68, 66, 83, 101, 114] {
+            //    send_library_port(stream);
+            //}
+        },
+        Err(err) => eprintln!("{:?}", err),
     }
 }
