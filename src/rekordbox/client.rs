@@ -197,9 +197,7 @@ impl Client {
 
             for stream in listener.incoming() {
                 match stream {
-                    Ok(stream) => {
-                        eprintln!("Received connection from: {:?}", stream);
-                    },
+                    Ok(stream) => handle_client(stream),
                     Err(err) => eprintln!("{:?}", err),
                 }
             }
