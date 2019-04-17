@@ -2,7 +2,7 @@ extern crate byteorder;
 
 use byteorder::{WriteBytesExt, BigEndian};
 use std::net::{UdpSocket, SocketAddr};
-use crate::rekordbox::rpc_socket_pool::Pool;
+use super::pooled_port::Pool;
 use super::{RPC, Portmap, RPCCall, RPCReply, Mount};
 use std::io::Error;
 use std::time::Duration;

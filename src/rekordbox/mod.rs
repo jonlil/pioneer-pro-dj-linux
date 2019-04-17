@@ -13,7 +13,6 @@ pub const APPLICATION_NAME: [u8; 20] = [
 pub mod client;
 pub mod event;
 pub mod player;
-pub mod rpc_socket_pool;
 pub mod util;
 
 // Internal mods
