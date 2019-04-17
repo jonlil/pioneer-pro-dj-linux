@@ -92,11 +92,19 @@ pub fn send_library_port(mut stream: TcpStream) {
     };
 }
 
-pub fn get_package_type(buffer: &[u8]) {
+pub enum Event {
+    RemoteDBServer,
+    Unsupported,
+}
+
+pub fn get_package_type(buffer: &[u8]) -> Event {
     match buffer {
          //0x52, 0x65, 0x6d, 0x6f, 0x74, 0x65, 0x44, 0x42, 0x53, 0x65, 0x72, 0x76, 0x65, 0x72, 0x00
-         &[0, 0, 0, 15, 82, 101, 109, 111, 116, 101, 68, 66, 83, 101, 114] => eprintln!("Got RemoteDBServer Package"),
-         _ => eprintln!("Got unsupported TCP Package:\n{:?}", buffer),
+         &[0, 0, 0, 15, 82, 101, 109, 111, 116, 101, 68, 66, 83, 101, 114, 118, 101, 114, 0] => Event::RemoteDBServer,
+         _ => {
+             eprintln!("Got unsupported TCP Package:\n{:?} with len: {:?}", buffer, buffer.len());
+             Event::Unsupported
+         }
     }
 }
 
@@ -104,10 +112,10 @@ pub fn handle_client(mut stream: TcpStream) {
     let mut buf = [0u8; 64];
     match stream.read(&mut buf) {
         Ok(size) => {
-            get_package_type(&buf[..size]);
-            //if size == 19 && buf[..size].to_vec() == vec![0, 0, 0, 15, 82, 101, 109, 111, 116, 101, 68, 66, 83, 101, 114] {
-            //    send_library_port(stream);
-            //}
+            match get_package_type(&buf[..size]) {
+                Event::RemoteDBServer => send_library_port(stream),
+                Event::Unsupported => {},
+            }
         },
         Err(err) => eprintln!("{:?}", err),
     }
