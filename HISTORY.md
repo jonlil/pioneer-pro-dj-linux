@@ -2,6 +2,14 @@
 
 In this file I will try to add important milestones/achievements in a happy format.
 
+#### 2019-04-23
+Big milestone reached today!! I have managed to figure how too respond to the players
+browsing requests. That is one big step towards being able to choose a track in the player interface
+that this application will upload.
+
+There is much more work required to be able to manage multiple players. That is because the
+RemoteDBServer currently use a hardcoded TCP Port in the response.
+
 #### 2019-03-24
 Current state of this project is that players have started to respond to commnication.
 I'm currently working on implementing the RPC server. Some work has been made on
