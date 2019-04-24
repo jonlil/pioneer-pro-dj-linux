@@ -241,6 +241,8 @@ pub fn handle_client(mut stream: TcpStream) {
 #[derive(Debug)]
 enum Request {
     Initiate(Bytes),
+    QueryListItem(Bytes),
+    FetchListItemContent(Bytes),
     Unimplemented,
 }
 #[derive(Debug)]
@@ -248,6 +250,7 @@ enum Response {
     Initiate(Bytes),
     Unimplemented(Bytes),
 }
+
 
 fn is_library_browsing_request(bytes: &[u8]) -> bool {
     bytes == [0x11, 0x87, 0x23, 0x49, 0xae, 0x11]
@@ -258,8 +261,8 @@ impl Request {
         if input.len() == 5 {
             Ok(Request::Initiate(input.freeze()))
         } else if is_library_browsing_request(&input[0..=5]) {
-            Ok(match input[11] {
-                0x00 => Request::Initiate(
+            Ok(match input.len() {
+                37 => Request::Initiate(
                     Bytes::from(vec![
                         0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0xff, 0xff,
                         0xff, 0xfe, 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
@@ -269,17 +272,21 @@ impl Request {
                         0x00, 0x11,
                     ])
                 ),
-                0x10 => Request::Initiate(
-                    Bytes::from(vec![
+                47 => {
+                    Request::Initiate(Bytes::from(vec![
                         0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
                         0x00, input[9], 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
                         0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                         0x11, 0x00, 0x00, 0x10, 0x00, 0x11, 0x00, 0x00,
                         0x00, 0x08
-                    ])
-                ),
-                0x30 => Request::Initiate(Library::tbd(input[9])),
+                    ]))
+                },
+                42 => {
+                    eprintln!("Received query for page: {:?}", input[12]);
+                    Request::QueryListItem(Bytes::from(vec![]))
+                },
+                62 => Request::FetchListItemContent(Library::tbd(input[9])),
                 _ => {
                     Request::Unimplemented
                 },
@@ -295,6 +302,8 @@ fn process(bytes: BytesMut) -> Result<Response, &'static str> {
     if let Ok(request) = Request::parse(bytes) {
         Ok(match request {
             Request::Initiate(response) => Response::Initiate(response),
+            Request::QueryListItem(response) => Response::Initiate(response),
+            Request::FetchListItemContent(response) => Response::Initiate(response),
             Request::Unimplemented => Response::Unimplemented(Bytes::from("Unimplemented")),
         })
     } else {
@@ -328,10 +337,7 @@ impl TcpServer {
                         writer.send(response)
                     });
 
-                    let msg = writes.then(move |err| {
-                        eprintln!("{:?}", err);
-                        Ok(())
-                    });
+                    let msg = writes.then(move |_w| Ok(()));
 
                     tokio::spawn(msg)
                 })
@@ -354,7 +360,7 @@ impl TcpServer {
                         //       respond back to.
                         write_all(socket, &[0xff, 0x20]).then(|_| Ok(()))
                     })
-                    .map_err(|err| eprintln!("{:?}", err));
+                    .map_err(|err| eprintln!("Failed responding to port: {:?}", err));
                 tokio::spawn(processor)
             });
         tokio::run(done);
