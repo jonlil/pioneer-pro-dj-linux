@@ -4,8 +4,9 @@ extern crate bytes;
 extern crate futures;
 
 use std::net::{SocketAddr};
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::thread;
+use std::sync::{Arc, Mutex};
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{read_exact, write_all};
@@ -13,6 +14,12 @@ use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
 use bytes::{Bytes, BytesMut};
 
+use super::db::{RecordDB};
+
+#[derive(Debug, PartialEq)]
+pub struct Artist {
+    value: String,
+}
 
 struct Library;
 impl Library {
@@ -283,7 +290,7 @@ impl Request {
                     ]))
                 },
                 42 => {
-                    eprintln!("Received query for page: {:?}", input[12]);
+                    eprintln!("QueryPage: {:?}", input[12]);
                     Request::QueryListItem(Bytes::from(vec![]))
                 },
                 62 => Request::FetchListItemContent(Library::tbd(input[9])),
@@ -372,6 +379,19 @@ impl TcpServer {
         });
 
         thread::spawn(move || {
+            let mut db = RecordDB::new();
+
+            // Assign some artists
+            if let Ok(Some(table)) = db.mut_table(0x02) {
+                table.insert(Artist {
+                    value: "Jonas Liljestrand".to_string(),
+                });
+
+                table.insert(Artist {
+                    value: "Tokio".to_string(),
+                });
+            }
+
             TcpServer::library_server("0.0.0.0:65312");
         });
     }

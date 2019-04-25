@@ -3,7 +3,7 @@ extern crate byteorder;
 use byteorder::{WriteBytesExt, BigEndian};
 use std::net::{UdpSocket, SocketAddr};
 use super::pooled_port::Pool;
-use super::{RPC, Portmap, RPCCall, RPCReply, Mount};
+use super::{RPC, Portmap, RPCCall, Mount};
 use std::io::Error;
 use std::time::Duration;
 use std::thread;

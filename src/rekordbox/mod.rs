@@ -14,6 +14,7 @@ pub mod client;
 pub mod event;
 pub mod player;
 pub mod util;
+pub mod db;
 
 // Internal mods
 mod message;
