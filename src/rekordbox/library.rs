@@ -291,13 +291,23 @@ impl Request {
                     ]))
                 },
                 42 => {
+                    let mut has_items: u8 = 0;
                     if let Ok(db) = client_context.db.lock() {
                         if let Ok(table) = db.table(input[12]) {
-                            eprintln!("{:?}", table);
+                            if table.rows.len() >= 0 as usize {
+                                has_items = 0x01;
+                            }
                         }
                     }
-                    eprintln!("QueryPage: {:?}", input[12]);
-                    Request::QueryListItem(Bytes::from(vec![]))
+
+                    Request::QueryListItem(Bytes::from(vec![
+                        0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+                        0x00, input[9], 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
+                        0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
+                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                        0x11, 0x00, 0x00, 0x10, 0x02, 0x11, 0x00, 0x00,
+                        0x00, has_items,
+                    ]))
                 },
                 62 => Request::FetchListItemContent(Library::tbd(input[9])),
                 _ => {
