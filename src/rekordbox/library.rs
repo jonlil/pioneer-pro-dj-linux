@@ -21,7 +21,7 @@ pub struct Artist {
     value: String,
 }
 
-type SharedLibrary = Arc<Mutex<RecordDB<Artist>>>;
+type SharedLibrary = Mutex<RecordDB<Artist>>;
 
 struct Library;
 impl Library {
@@ -260,13 +260,12 @@ enum Response {
     Unimplemented(Bytes),
 }
 
-
 fn is_library_browsing_request(bytes: &[u8]) -> bool {
     bytes == [0x11, 0x87, 0x23, 0x49, 0xae, 0x11]
 }
 
 impl Request {
-    fn parse(input: BytesMut) -> Result<Request, &'static str> {
+    fn parse(input: BytesMut, client_context: &SharedClientContext) -> Result<Request, &'static str> {
         if input.len() == 5 {
             Ok(Request::Initiate(input.freeze()))
         } else if is_library_browsing_request(&input[0..=5]) {
@@ -292,6 +291,11 @@ impl Request {
                     ]))
                 },
                 42 => {
+                    if let Ok(db) = client_context.db.lock() {
+                        if let Ok(table) = db.table(input[12]) {
+                            eprintln!("{:?}", table);
+                        }
+                    }
                     eprintln!("QueryPage: {:?}", input[12]);
                     Request::QueryListItem(Bytes::from(vec![]))
                 },
@@ -307,8 +311,21 @@ impl Request {
     }
 }
 
-fn process(bytes: BytesMut, db: &SharedLibrary) -> Result<Response, &'static str> {
-    if let Ok(request) = Request::parse(bytes) {
+type SharedClientContext = Arc<ClientContext>;
+struct ClientContext {
+    db: SharedLibrary,
+}
+
+impl ClientContext {
+    pub fn new(db: RecordDB<Artist>) -> Self {
+        Self {
+            db: Mutex::new(db),
+        }
+    }
+}
+
+fn process(bytes: BytesMut, client_context: &SharedClientContext) -> Result<Response, &'static str> {
+    if let Ok(request) = Request::parse(bytes, client_context) {
         Ok(match request {
             Request::Initiate(response) => Response::Initiate(response),
             Request::QueryListItem(response) => Response::Initiate(response),
@@ -322,7 +339,7 @@ fn process(bytes: BytesMut, db: &SharedLibrary) -> Result<Response, &'static str
 
 pub struct TcpServer;
 impl TcpServer {
-    fn library_server(address: &str, db: SharedLibrary) {
+    fn library_server(address: &str, client_context: SharedClientContext) {
         let addr = address.parse::<SocketAddr>().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
 
@@ -333,11 +350,11 @@ impl TcpServer {
                 .for_each(move |socket| {
                     let framed = BytesCodec::new().framed(socket);
                     let (writer, reader) = framed.split();
-                    let mut db = db.clone();
+                    let client_context = client_context.clone();
 
                     let responses = reader.map(move |bytes| {
-                        let db = &db;
-                        match process(bytes, db) {
+                        let client_context = &client_context;
+                        match process(bytes, client_context) {
                             Ok(Response::Initiate(response)) => response,
                             Ok(Response::Unimplemented(response)) => response,
                             Err(err) => Bytes::from(err),
@@ -354,7 +371,6 @@ impl TcpServer {
                 })
         });
     }
-
 
     fn library_initializer(address: &str) {
         let addr = address.parse::<SocketAddr>().unwrap();
@@ -396,7 +412,8 @@ impl TcpServer {
                 });
             }
 
-            TcpServer::library_server("0.0.0.0:65312", Arc::new(Mutex::new(db)));
+            let client_context = ClientContext::new(db);
+            TcpServer::library_server("0.0.0.0:65312", Arc::new(client_context));
         });
     }
 }
