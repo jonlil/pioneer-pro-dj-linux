@@ -21,6 +21,8 @@ pub struct Artist {
     value: String,
 }
 
+type SharedLibrary = Arc<Mutex<RecordDB<Artist>>>;
+
 struct Library;
 impl Library {
     pub fn start_page() -> Vec<u8> {
@@ -305,7 +307,7 @@ impl Request {
     }
 }
 
-fn process(bytes: BytesMut) -> Result<Response, &'static str> {
+fn process(bytes: BytesMut, db: &SharedLibrary) -> Result<Response, &'static str> {
     if let Ok(request) = Request::parse(bytes) {
         Ok(match request {
             Request::Initiate(response) => Response::Initiate(response),
@@ -320,7 +322,7 @@ fn process(bytes: BytesMut) -> Result<Response, &'static str> {
 
 pub struct TcpServer;
 impl TcpServer {
-    fn library_server(address: &str) {
+    fn library_server(address: &str, db: SharedLibrary) {
         let addr = address.parse::<SocketAddr>().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
 
@@ -328,12 +330,14 @@ impl TcpServer {
             listener
                 .incoming()
                 .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
-                .for_each(|socket| {
+                .for_each(move |socket| {
                     let framed = BytesCodec::new().framed(socket);
                     let (writer, reader) = framed.split();
+                    let mut db = db.clone();
 
                     let responses = reader.map(move |bytes| {
-                        match process(bytes) {
+                        let db = &db;
+                        match process(bytes, db) {
                             Ok(Response::Initiate(response)) => response,
                             Ok(Response::Unimplemented(response)) => response,
                             Err(err) => Bytes::from(err),
@@ -392,7 +396,7 @@ impl TcpServer {
                 });
             }
 
-            TcpServer::library_server("0.0.0.0:65312");
+            TcpServer::library_server("0.0.0.0:65312", Arc::new(Mutex::new(db)));
         });
     }
 }
