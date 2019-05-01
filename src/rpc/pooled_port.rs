@@ -59,7 +59,7 @@ impl Pool {
         Ok(Pool(shared))
     }
 
-    fn put_back(&self, mut port: u16) {
+    fn put_back(&self, port: u16) {
         let mut internals = self.0.internals.lock();
         internals.ports.push(Port {
             port: port,
@@ -79,7 +79,7 @@ impl Pool {
 
             match self.try_get_inner(self.0.internals.lock()) {
                 Ok(port) => return Ok(port),
-                Err(i) => {},
+                Err(_i) => {},
             }
 
             if tries >= retries {
