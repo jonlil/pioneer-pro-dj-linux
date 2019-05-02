@@ -6,7 +6,7 @@ extern crate futures;
 use std::net::{SocketAddr};
 use std::io::{Read, Write};
 use std::thread;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{read_exact, write_all};
@@ -14,7 +14,7 @@ use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
 use bytes::{Bytes, BytesMut};
 
-use super::db::{RecordDB};
+use super::db::{RecordDB, Table};
 
 #[derive(Debug, PartialEq)]
 pub struct Artist {
@@ -292,13 +292,11 @@ impl Request {
                 },
                 42 => {
                     let mut has_items: u8 = 0;
-                    if let Ok(db) = client_context.db.lock() {
-                        if let Ok(table) = db.table(input[12]) {
-                            if table.rows.len() >= 0 as usize {
-                                has_items = 0x01;
-                            }
+                    client_context.db.table(input[12], |table| {
+                        if table.rows.len() >= 0 as usize {
+                            has_items = 0x01;
                         }
-                    }
+                    });
 
                     Request::QueryListItem(Bytes::from(vec![
                         0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
@@ -321,15 +319,42 @@ impl Request {
     }
 }
 
+struct DbWrapper {
+    inner: SharedLibrary,
+}
+
+impl DbWrapper {
+    pub fn new(db: RecordDB<Artist>) -> DbWrapper {
+        DbWrapper {
+            inner: Mutex::new(db),
+        }
+    }
+
+    pub fn read<F: FnOnce(MutexGuard<RecordDB<Artist>>)>(&self, f: F) {
+        match self.inner.lock() {
+            Ok(db) => f(db),
+            Err(_) => {},
+        }
+    }
+
+    pub fn table<F: FnOnce(&Table<Artist>)>(&self, name: u8, f: F) {
+        self.read(|db| {
+            if let Ok(table) = db.table(name) {
+                f(table);
+            }
+        });
+    }
+}
+
 type SharedClientContext = Arc<ClientContext>;
 struct ClientContext {
-    db: SharedLibrary,
+    db: DbWrapper,
 }
 
 impl ClientContext {
     pub fn new(db: RecordDB<Artist>) -> Self {
         Self {
-            db: Mutex::new(db),
+            db: DbWrapper::new(db),
         }
     }
 }
