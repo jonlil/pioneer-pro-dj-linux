@@ -247,7 +247,11 @@ fn is_library_browsing_request(bytes: &[u8]) -> bool {
 }
 
 impl Request {
-    fn parse(input: BytesMut, client_context: &SharedClientContext) -> Result<Request, &'static str> {
+    fn parse(
+        input: BytesMut,
+        client_context: &SharedClientContext,
+        player_state: &mut PlayerState
+    ) -> Result<Request, &'static str> {
         if input.len() == 5 {
             Ok(Request::Initiate(input.freeze()))
         } else if is_library_browsing_request(&input[0..=5]) {
@@ -279,6 +283,8 @@ impl Request {
                             has_items = 0x02;
                         }
                     });
+
+                    player_state.current_page = Some(input[12].to_owned());
 
                     Request::QueryListItem(Bytes::from(vec![
                         0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
@@ -345,8 +351,8 @@ impl ClientContext {
     }
 }
 
-fn process(bytes: BytesMut, client_context: &SharedClientContext) -> Result<Response, &'static str> {
-    if let Ok(request) = Request::parse(bytes, client_context) {
+fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: &mut PlayerState) -> Result<Response, &'static str> {
+    if let Ok(request) = Request::parse(bytes, client_context, player_state) {
         Ok(match request {
             Request::Initiate(response) => Response::Initiate(response),
             Request::QueryListItem(response) => Response::Initiate(response),
@@ -356,6 +362,10 @@ fn process(bytes: BytesMut, client_context: &SharedClientContext) -> Result<Resp
     } else {
         Err("Failed processing request into response")
     }
+}
+
+struct PlayerState {
+    current_page: Option<u8>,
 }
 
 pub struct TcpServer;
@@ -369,13 +379,16 @@ impl TcpServer {
                 .incoming()
                 .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
                 .for_each(move |socket| {
+                    let mut player_state = PlayerState {
+                        current_page: None,
+                    };
                     let framed = BytesCodec::new().framed(socket);
                     let (writer, reader) = framed.split();
                     let client_context = client_context.clone();
 
                     let responses = reader.map(move |bytes| {
                         let client_context = &client_context;
-                        match process(bytes, client_context) {
+                        match process(bytes, client_context, &mut player_state) {
                             Ok(Response::Initiate(response)) => response,
                             Ok(Response::Unimplemented(response)) => response,
                             Err(err) => Bytes::from(err),
