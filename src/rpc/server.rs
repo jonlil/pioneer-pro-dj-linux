@@ -134,7 +134,7 @@ impl PortmapProgramHandler {
     }
 }
 
-fn convert_u16_to_two_u8s_be(integer: u16) -> Vec<u8> {
+pub fn convert_u16_to_two_u8s_be(integer: u16) -> Vec<u8> {
     let mut res = vec![];
     res.write_u16::<BigEndian>(integer).unwrap();
     res

@@ -3,8 +3,9 @@ extern crate tokio_codec;
 extern crate bytes;
 extern crate futures;
 
-use std::net::{SocketAddr};
-use std::io::{Read, Write};
+use futures::{Future, Async, Poll};
+use std::net::{SocketAddr, Ipv4Addr, IpAddr};
+use std::io::{Read, Write, self};
 use std::thread;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -14,6 +15,7 @@ use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
 use bytes::{Bytes, BytesMut};
 
+use crate::rpc::server::convert_u16_to_two_u8s_be;
 use super::db::{RecordDB, Table};
 
 #[derive(Debug, PartialEq)]
@@ -22,6 +24,10 @@ pub struct Artist {
 }
 
 type SharedLibrary = Mutex<RecordDB<Artist>>;
+
+struct PlayerState {
+    current_page: Option<u8>,
+}
 
 struct Library;
 impl Library {
@@ -364,15 +370,13 @@ fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: 
     }
 }
 
-struct PlayerState {
-    current_page: Option<u8>,
-}
-
 pub struct TcpServer;
 impl TcpServer {
-    fn library_server(address: &str, client_context: SharedClientContext) {
-        let addr = address.parse::<SocketAddr>().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
+    fn library_server(
+        address: &SocketAddr,
+        client_context: SharedClientContext
+    ) -> Result<(), io::Error> {
+        let listener = TcpListener::bind(address)?;
 
         tokio::run({
             listener
@@ -404,22 +408,32 @@ impl TcpServer {
                     tokio::spawn(msg)
                 })
         });
+
+        Ok(())
     }
 
-    fn library_initializer(address: &str) {
+    fn library_initializer(address: &str, client_context: SharedClientContext) {
         let addr = address.parse::<SocketAddr>().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
+        let mut tcp_port_pool: Vec<u16> = vec![65312, 65313, 65314, 65315];
 
         let done = listener
             .incoming()
             .map_err(|e| println!("failed to accept socket; error = {:?}", e))
-            .for_each(|socket| {
+            .for_each(move |socket| {
+                let tcp_port = tcp_port_pool.pop().unwrap();
+                let client_context = client_context.clone();
+                let allocated_port = tcp_port.to_u8_vec();
+
                 let processor = read_exact(socket, vec![0; 19])
-                    .and_then(|(socket, _bytes)| {
-                        // TODO: Implement connection pool
-                        //       Here we write back the TCP Port that the client will
-                        //       respond back to.
-                        write_all(socket, &[0xff, 0x20]).then(|_| Ok(()))
+                    .and_then(move |(socket, _bytes)| {
+                        initialize_client_library(
+                            tcp_port,
+                            client_context
+                        ).then(|_| Ok((socket, allocated_port)))
+                    })
+                    .and_then(|(socket, allocated_port)| {
+                        write_all(socket, allocated_port.to_owned()).then(|_| Ok(()))
                     })
                     .map_err(|err| eprintln!("Failed responding to port: {:?}", err));
                 tokio::spawn(processor)
@@ -428,26 +442,61 @@ impl TcpServer {
     }
 
     pub fn run() {
-        thread::spawn(move || {
-            TcpServer::library_initializer("0.0.0.0:12523");
-        });
+        let mut db = RecordDB::new();
 
-        thread::spawn(move || {
-            let mut db = RecordDB::new();
+        // Assign some artists
+        if let Ok(Some(table)) = db.mut_table(0x02) {
+            table.insert(Artist {
+                value: "Jonas Liljestrand".to_string(),
+            });
 
-            // Assign some artists
-            if let Ok(Some(table)) = db.mut_table(0x02) {
-                table.insert(Artist {
-                    value: "Jonas Liljestrand".to_string(),
-                });
+            table.insert(Artist {
+                value: "Tokio".to_string(),
+            });
+        }
 
-                table.insert(Artist {
-                    value: "Tokio".to_string(),
-                });
-            }
+        TcpServer::library_initializer(
+            "0.0.0.0:12523",
+            Arc::new(ClientContext::new(db))
+        );
+    }
+}
 
-            let client_context = ClientContext::new(db);
-            TcpServer::library_server("0.0.0.0:65312", Arc::new(client_context));
-        });
+trait U16ToVec {
+    fn to_u8_vec(self) -> Vec<u8>;
+}
+
+impl U16ToVec for u16 {
+    fn to_u8_vec(self) -> Vec<u8> {
+        convert_u16_to_two_u8s_be(self)
+    }
+}
+
+fn initialize_client_library(
+    port: u16,
+    client_context: SharedClientContext
+) -> InitializeClientLibrary {
+    InitializeClientLibrary {
+        port: port,
+        client_context: client_context
+    }
+}
+
+struct InitializeClientLibrary {
+    port: u16,
+    client_context: SharedClientContext,
+}
+
+impl Future for InitializeClientLibrary {
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), self.port);
+
+        match TcpServer::library_server(&address, self.client_context.clone()) {
+            Ok(_) => Ok(Async::Ready(())),
+            Err(err) => Err(err),
+        }
     }
 }
