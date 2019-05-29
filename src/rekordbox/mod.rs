@@ -20,3 +20,4 @@ pub mod db;
 mod message;
 mod rpc;
 mod library;
+mod packages;

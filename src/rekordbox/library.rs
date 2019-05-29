@@ -18,6 +18,8 @@ use bytes::{Bytes, BytesMut};
 use crate::rpc::server::convert_u16_to_two_u8s_be;
 use super::db::{RecordDB, Table};
 
+pub struct DBMessage;
+
 #[derive(Debug, PartialEq)]
 pub struct Artist {
     value: String,
