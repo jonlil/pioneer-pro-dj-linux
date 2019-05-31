@@ -24,7 +24,7 @@ struct DBMessage;
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
-type DBMessageU16<'a, T> = IResult<&'a [u8], T>;
+type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
 
 impl DBMessage {
     fn magic(i: &[u8]) -> DBMessageResult {
@@ -38,17 +38,22 @@ impl DBMessage {
         Ok((i, transaction))
     }
 
-    fn request_type(i: &[u8]) -> DBMessageU16<DBRequestType> {
+    fn request_type(i: &[u8]) -> DBMessageResultType<DBRequestType> {
         let (i, _) = take(1u8)(i)?;
 
-        let request_type: DBMessageU16<u16> = be_u16(i);
+        let request_type: DBMessageResultType<u16> = be_u16(i);
         match request_type {
             Ok((i, 0_u16)) => Ok((i, DBRequestType::Setup)),
             Ok((i, data)) => Ok((i, DBRequestType::Unknown(data))),
             Err(err) => Err(err),
         }
     }
-    fn argument_count() {}
+
+    fn argument_count(i: &[u8]) -> DBMessageResultType<u8> {
+        let (i, _) = take(1u8)(i)?;
+        be_u8(i)
+    }
+
     fn arg_types() {}
     fn args() {}
 
@@ -108,6 +113,14 @@ mod test {
         assert_eq!(
             Ok((&[][..], DBRequestType::Unknown(255_u16))),
             DBMessage::request_type(&[DBFieldType::U16 as u8, 0x00, 0xff]),
+        );
+    }
+
+    #[test]
+    fn parse_argument_count() {
+        assert_eq!(
+            Ok((&[][..], 3_u8)),
+            DBMessage::argument_count(&[DBFieldType::U8 as u8, 0x03]),
         );
     }
 
