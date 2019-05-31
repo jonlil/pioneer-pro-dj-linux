@@ -1,5 +1,4 @@
-extern crate nom;
-
+use nom::multi::count;
 use nom::bytes::complete::{tag, take};
 use nom::number::complete::{be_u32, be_u16, be_u8};
 use nom::IResult;
@@ -20,14 +19,21 @@ enum DBFieldType {
 }
 
 #[derive(Debug, PartialEq)]
-struct DBMessage;
+struct DBMessage<'a> {
+    transaction_id: u32,
+    request_type: DBRequestType,
+    argument_count: u8,
+    arg_types: &'a [u8],
+    args: Vec<&'a [u8]>,
+}
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
 type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
 
-impl DBMessage {
+impl<'a> DBMessage<'a> {
     fn magic(i: &[u8]) -> DBMessageResult {
+        let (i, _) = take(1u8)(i)?;
         tag([0x87, 0x23, 0x49, 0xae])(i)
     }
 
@@ -43,6 +49,7 @@ impl DBMessage {
 
         let request_type: DBMessageResultType<u16> = be_u16(i);
         match request_type {
+            Ok((i, 4096_u16)) => Ok((i, DBRequestType::RootMenuRequest)),
             Ok((i, 0_u16)) => Ok((i, DBRequestType::Setup)),
             Ok((i, data)) => Ok((i, DBRequestType::Unknown(data))),
             Err(err) => Err(err),
@@ -54,17 +61,41 @@ impl DBMessage {
         be_u8(i)
     }
 
-    fn arg_types() {}
-    fn args() {}
+    fn arg_types(i: &[u8]) -> DBMessageResult {
+        let (i, _) = take(1u8)(i)?;
+        take(16u8)(i)
+    }
 
-    pub fn parse(i: &[u8]) -> Result<DBMessage, Error> {
-        Ok(DBMessage {})
+    pub fn parse(i: &[u8]) -> IResult<&[u8], DBMessage> {
+        fn parse_arguments(input: &[u8]) -> IResult<&[u8], &[u8]> {
+            match be_u8(input) {
+                Err(err) => Err(err),
+                Ok((input, 0x11)) => take(4u8)(input),
+                Ok((input, _consumed)) => Ok((input, &[])),
+            }
+        }
+
+        let (i, _magic) = DBMessage::magic(i)?;
+        let (i, transaction_id) = DBMessage::transaction_id(i)?;
+        let (i, request_type) = DBMessage::request_type(i)?;
+        let (i, argument_count) = DBMessage::argument_count(i)?;
+        let (i, arg_types) = DBMessage::arg_types(i)?;
+        let (i, args) = count(parse_arguments, argument_count as usize)(i)?;
+
+        Ok((i, DBMessage {
+            transaction_id: transaction_id,
+            request_type: request_type,
+            argument_count: argument_count,
+            arg_types: arg_types,
+            args: args,
+        }))
     }
 }
 
 #[derive(Debug, PartialEq)]
 enum DBRequestType {
     Setup,
+    RootMenuRequest,
     Unknown(u16),
 }
 
@@ -76,7 +107,7 @@ mod test {
     fn extract_magic_from_db_message() {
         assert_eq!(
             Ok((&[0x11][..], &[135, 35, 73, 174][..])),
-            DBMessage::magic(&[0x87, 0x23, 0x49, 0xae, 0x11]),
+            DBMessage::magic(&[0x11, 0x87, 0x23, 0x49, 0xae, 0x11]),
         );
     }
 
@@ -124,6 +155,35 @@ mod test {
         );
     }
 
+    #[test]
+    fn parse_dbmessage() {
+        let message = [
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+            0x00, 0x32, 0x10, 0x10, 0x00, 0x0f, 0x03, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x02, 0x01, 0x04, 0x01, 0x11, 0x00, 0x00,
+            0x00, 0x00, 0x11, 0x00, 0xff, 0xff, 0xff,
+        ];
+
+        assert_eq!(
+            Ok((&[][..], DBMessage {
+                transaction_id: 92274738_u32,
+                request_type: DBRequestType::RootMenuRequest,
+                argument_count: 3_u8,
+                arg_types: &[
+                    0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ],
+                args: vec![
+                    &[0x02, 0x01, 0x04, 0x01],
+                    &[0x00, 0x00, 0x00, 0x00],
+                    &[0x00, 0xff, 0xff, 0xff],
+                ],
+            })),
+            DBMessage::parse(&message),
+        );
+    }
     #[test]
     fn parse_db_field_type() {
     }
