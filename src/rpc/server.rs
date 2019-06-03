@@ -3,7 +3,7 @@ extern crate byteorder;
 use byteorder::{WriteBytesExt, BigEndian};
 use std::net::{UdpSocket, SocketAddr};
 use super::pooled_port::Pool;
-use super::{RPC, Portmap, RPCCall, RPCReply, Mount};
+use super::{RPC, Portmap, RPCCall, Mount};
 use std::io::Error;
 use std::time::Duration;
 use std::thread;
@@ -134,7 +134,7 @@ impl PortmapProgramHandler {
     }
 }
 
-fn convert_u16_to_two_u8s_be(integer: u16) -> Vec<u8> {
+pub fn convert_u16_to_two_u8s_be(integer: u16) -> Vec<u8> {
     let mut res = vec![];
     res.write_u16::<BigEndian>(integer).unwrap();
     res

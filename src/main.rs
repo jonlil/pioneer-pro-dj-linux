@@ -5,9 +5,10 @@ mod rpc;
 
 extern crate rand;
 extern crate pnet;
+extern crate nom;
+extern crate tokio;
 
 use std::io;
-use crate::rekordbox::player::{PlayerCollection};
 
 fn main() -> Result<(), io::Error> {
     let mut app = component::App {};

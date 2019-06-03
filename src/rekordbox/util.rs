@@ -9,10 +9,3 @@ where
     <A as AsMut<[T]>>::as_mut(&mut a).clone_from_slice(slice);
     a
 }
-
-#[cfg(test)]
-mod test {
-    use super::clone_into_array;
-
-    fn it_can_convert_vec_into_sized_aray() {}
-}

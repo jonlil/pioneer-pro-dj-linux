@@ -3,7 +3,6 @@
 
 use std::ops::RangeInclusive;
 use crate::rekordbox::util::clone_into_array;
-use std::collections::HashMap;
 
 pub mod server;
 mod pooled_port;

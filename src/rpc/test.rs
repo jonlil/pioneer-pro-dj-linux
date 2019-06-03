@@ -1,11 +1,8 @@
 use super::{
     RPC,
     Portmap,
-    Mount,
-    NFS,
     RPCProgram,
     RPCProcedure,
-    RPCCall,
 };
 
 fn set_rpc_version_2(buffer: &mut [u8]) {
