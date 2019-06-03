@@ -19,7 +19,7 @@ enum DBFieldType {
 }
 
 #[derive(Debug, PartialEq)]
-struct DBMessage<'a> {
+pub struct DBMessage<'a> {
     transaction_id: u32,
     request_type: DBRequestType,
     argument_count: u8,
@@ -44,15 +44,21 @@ impl<'a> DBMessage<'a> {
         Ok((i, transaction))
     }
 
-    fn request_type(i: &[u8]) -> DBMessageResultType<DBRequestType> {
-        let (i, _) = take(1u8)(i)?;
+    fn request_type(input: &[u8]) -> DBMessageResultType<DBRequestType> {
+        let (input, _) = take(1u8)(input)?;
 
-        let request_type: DBMessageResultType<u16> = be_u16(i);
+        let request_type: DBMessageResultType<u16> = be_u16(input);
         match request_type {
-            Ok((i, 4096_u16)) => Ok((i, DBRequestType::RootMenuRequest)),
-            Ok((i, 0_u16)) => Ok((i, DBRequestType::Setup)),
-            Ok((i, data)) => Ok((i, DBRequestType::Unknown(data))),
-            Err(err) => Err(err),
+            Ok((input, 4096_u16)) => Ok((input, DBRequestType::RootMenuRequest)),
+            Ok((input, 4097_u16)) => Ok((input, DBRequestType::GenreRequest)),
+            Ok((input, 4098_u16)) => Ok((input, DBRequestType::ArtistRequest)),
+            Ok((input, 4099_u16)) => Ok((input, DBRequestType::AlbumRequest)),
+            Ok((input, 4357_u16)) => Ok((input, DBRequestType::PlaylistRequest)),
+            Ok((input, 4100_u16)) => Ok((input, DBRequestType::TitleRequest)),
+            Ok((input, 4114_u16)) => Ok((input, DBRequestType::HistoryRequest)),
+            Ok((input, 0_u16))    => Ok((input, DBRequestType::Setup)),
+            Ok((input, data))     => Ok((input, DBRequestType::Unknown(data))),
+            Err(err)              => Err(err),
         }
     }
 
@@ -96,6 +102,12 @@ impl<'a> DBMessage<'a> {
 enum DBRequestType {
     Setup,
     RootMenuRequest,
+    GenreRequest,
+    ArtistRequest,
+    AlbumRequest,
+    TitleRequest,
+    PlaylistRequest,
+    HistoryRequest,
     Unknown(u16),
 }
 

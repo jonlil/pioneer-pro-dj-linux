@@ -14,10 +14,9 @@ pub mod client;
 pub mod event;
 pub mod player;
 pub mod util;
-pub mod db;
 
 // Internal mods
 mod message;
 mod rpc;
 mod library;
-mod packages;
+mod packets;

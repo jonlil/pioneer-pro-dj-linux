@@ -15,16 +15,7 @@ use tokio::prelude::*;
 use bytes::{Bytes, BytesMut};
 
 use crate::rpc::server::convert_u16_to_two_u8s_be;
-use super::db::{RecordDB, Table};
-
-pub struct DBMessage;
-
-#[derive(Debug, PartialEq)]
-pub struct Artist {
-    value: String,
-}
-
-type SharedLibrary = Mutex<RecordDB<Artist>>;
+use super::packets::DBMessage;
 
 struct PlayerState {
     current_page: Option<u8>,
@@ -256,12 +247,14 @@ fn is_library_browsing_request(bytes: &[u8]) -> bool {
 impl Request {
     fn parse(
         input: BytesMut,
-        client_context: &SharedClientContext,
-        player_state: &mut PlayerState
+        _client_context: &SharedClientContext,
+        _player_state: &mut PlayerState
     ) -> Result<Request, &'static str> {
         if input.len() == 5 {
             Ok(Request::Initiate(input.freeze()))
         } else if is_library_browsing_request(&input[0..=5]) {
+            eprintln!("{:?}", DBMessage::parse(&input.clone()));
+
             Ok(match input.len() {
                 37 => Request::Initiate(
                     Bytes::from(vec![
@@ -284,24 +277,16 @@ impl Request {
                     ]))
                 },
                 42 => {
-                    let mut has_items: u8 = 0;
-                    client_context.db.table(input[12], |table| {
-                        if table.rows.len() >= 0 as usize {
-                            has_items = 0x02;
-                        }
-                    });
-
-                    player_state.current_page = Some(input[12].to_owned());
-
                     Request::QueryListItem(Bytes::from(vec![
-                        0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
-                        input[8], input[9], 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
+                        0x11, 0x87, 0x23, 0x49, 0xae,
+                        0x11, input[6], input[7], input[8], input[9],
+                        0x10, 0x40, 0x00,
+                        0x0f, 0x02,
+                        0x14,
                         0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        0x11,
-                        0x00, 0x00, input[11], input[12],
-                        0x11,
-                        0x00, 0x00, 0x00, has_items,
+                        0x11, 0x00, 0x00, input[11], input[12],
+                        0x11, 0x00, 0x00, 0x00, 0x02,
                     ]))
                 },
                 62 => {
@@ -318,43 +303,12 @@ impl Request {
     }
 }
 
-struct DbWrapper {
-    inner: SharedLibrary,
-}
-
-impl DbWrapper {
-    pub fn new(db: RecordDB<Artist>) -> DbWrapper {
-        DbWrapper {
-            inner: Mutex::new(db),
-        }
-    }
-
-    pub fn read<F: FnOnce(MutexGuard<RecordDB<Artist>>)>(&self, f: F) {
-        match self.inner.lock() {
-            Ok(db) => f(db),
-            Err(_) => {},
-        }
-    }
-
-    pub fn table<F: FnOnce(&Table<Artist>)>(&self, name: u8, f: F) {
-        self.read(|db| {
-            if let Ok(table) = db.table(name) {
-                f(table);
-            }
-        });
-    }
-}
-
 type SharedClientContext = Arc<ClientContext>;
-struct ClientContext {
-    db: DbWrapper,
-}
+struct ClientContext;
 
 impl ClientContext {
-    pub fn new(db: RecordDB<Artist>) -> Self {
-        Self {
-            db: DbWrapper::new(db),
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 
@@ -443,22 +397,9 @@ impl TcpServer {
     }
 
     pub fn run() {
-        let mut db = RecordDB::new();
-
-        // Assign some artists
-        if let Ok(Some(table)) = db.mut_table(0x02) {
-            table.insert(Artist {
-                value: "Jonas Liljestrand".to_string(),
-            });
-
-            table.insert(Artist {
-                value: "Tokio".to_string(),
-            });
-        }
-
         TcpServer::library_initializer(
             "0.0.0.0:12523",
-            Arc::new(ClientContext::new(db))
+            Arc::new(ClientContext::new())
         );
     }
 }
