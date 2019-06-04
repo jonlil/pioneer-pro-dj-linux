@@ -325,16 +325,11 @@ fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: 
     }
 }
 
-pub struct DBServer;
+/// Handle library clients
+struct LibraryClientHandler;
 
-impl DBServer {
-
-    const DB_SERVER_QUERY_PORT: u16 = 12523;
-
-    fn library_client_server(
-        address: &SocketAddr,
-        client_context: SharedClientContext
-    ) -> Result<(), io::Error> {
+impl LibraryClientHandler {
+    fn spawn(address: &SocketAddr, context: SharedClientContext) -> Result<(), io::Error> {
         let listener = TcpListener::bind(address)?;
 
         tokio::run({
@@ -347,11 +342,11 @@ impl DBServer {
                     };
                     let framed = BytesCodec::new().framed(socket);
                     let (writer, reader) = framed.split();
-                    let client_context = client_context.clone();
+                    let context = context.clone();
 
                     let responses = reader.map(move |bytes| {
-                        let client_context = &client_context;
-                        match process(bytes, client_context, &mut player_state) {
+                        let context = &context;
+                        match process(bytes, context, &mut player_state) {
                             Ok(Response::Initiate(response)) => response,
                             Ok(Response::Unimplemented(response)) => response,
                             Err(err) => Bytes::from(err),
@@ -370,8 +365,11 @@ impl DBServer {
 
         Ok(())
     }
+}
 
-    fn client_listener(address: &str, client_context: SharedClientContext) {
+pub struct DBLibraryServer;
+impl DBLibraryServer {
+    fn spawn(address: &str, client_context: SharedClientContext) {
         let addr = address.parse::<SocketAddr>().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
         let mut tcp_port_pool: Vec<u16> = vec![65312, 65313, 65314, 65315];
@@ -399,7 +397,7 @@ impl DBServer {
     }
 
     pub fn run() {
-        DBServer::client_listener("0.0.0.0:12523", Arc::new(ClientContext::new()));
+        Self::spawn("0.0.0.0:12523", Arc::new(ClientContext::new()));
     }
 }
 
@@ -432,7 +430,7 @@ impl Future for InitializeClientLibraryHandler {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), self.port);
 
-        match DBServer::library_client_server(&address, self.client_context.clone()) {
+        match LibraryClientHandler::spawn(&address, self.client_context.clone()) {
             Ok(_) => Ok(Async::Ready(())),
             Err(err) => Err(err),
         }
