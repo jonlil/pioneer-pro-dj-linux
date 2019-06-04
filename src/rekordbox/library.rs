@@ -325,9 +325,13 @@ fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: 
     }
 }
 
-pub struct TcpServer;
-impl TcpServer {
-    fn library_server(
+pub struct DBServer;
+
+impl DBServer {
+
+    const DB_SERVER_QUERY_PORT: u16 = 12523;
+
+    fn library_client_server(
         address: &SocketAddr,
         client_context: SharedClientContext
     ) -> Result<(), io::Error> {
@@ -367,7 +371,7 @@ impl TcpServer {
         Ok(())
     }
 
-    fn library_initializer(address: &str, client_context: SharedClientContext) {
+    fn client_listener(address: &str, client_context: SharedClientContext) {
         let addr = address.parse::<SocketAddr>().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
         let mut tcp_port_pool: Vec<u16> = vec![65312, 65313, 65314, 65315];
@@ -382,10 +386,8 @@ impl TcpServer {
 
                 let processor = read_exact(socket, vec![0; 19])
                     .and_then(move |(socket, _bytes)| {
-                        initialize_client_library(
-                            tcp_port,
-                            client_context
-                        ).then(|_| Ok((socket, allocated_port)))
+                        allocate_library_client_handler(tcp_port, client_context)
+                            .then(|_| Ok((socket, allocated_port)))
                     })
                     .and_then(|(socket, allocated_port)| {
                         write_all(socket, allocated_port.to_owned()).then(|_| Ok(()))
@@ -397,10 +399,7 @@ impl TcpServer {
     }
 
     pub fn run() {
-        TcpServer::library_initializer(
-            "0.0.0.0:12523",
-            Arc::new(ClientContext::new())
-        );
+        DBServer::client_listener("0.0.0.0:12523", Arc::new(ClientContext::new()));
     }
 }
 
@@ -414,29 +413,26 @@ impl U16ToVec for u16 {
     }
 }
 
-fn initialize_client_library(
-    port: u16,
-    client_context: SharedClientContext
-) -> InitializeClientLibrary {
-    InitializeClientLibrary {
+fn allocate_library_client_handler(port: u16, client_context: SharedClientContext) -> InitializeClientLibraryHandler {
+    InitializeClientLibraryHandler {
         port: port,
         client_context: client_context
     }
 }
 
-struct InitializeClientLibrary {
+struct InitializeClientLibraryHandler {
     port: u16,
     client_context: SharedClientContext,
 }
 
-impl Future for InitializeClientLibrary {
+impl Future for InitializeClientLibraryHandler {
     type Item = ();
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), self.port);
 
-        match TcpServer::library_server(&address, self.client_context.clone()) {
+        match DBServer::library_client_server(&address, self.client_context.clone()) {
             Ok(_) => Ok(Async::Ready(())),
             Err(err) => Err(err),
         }

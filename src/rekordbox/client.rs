@@ -14,7 +14,7 @@ use super::event::{self, Event, EventParser};
 use crate::rekordbox::player::{PlayerCollection};
 use super::rpc::EventHandler as RPCEventHandler;
 use crate::rpc::server::{RPCServer};
-use super::library::TcpServer;
+use super::library::DBServer;
 
 #[derive(Debug)]
 pub enum Error {
@@ -180,7 +180,7 @@ impl Client {
     }
 
     fn library_handler(_state_ref: LockedClientState) {
-        TcpServer::run();
+        DBServer::run();
     }
 
     // TODO: Break out this to RPC::Server
