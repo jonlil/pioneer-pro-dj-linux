@@ -313,6 +313,12 @@ impl ClientContext {
 }
 
 fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: &mut PlayerState) -> Result<Response, &'static str> {
+    if let Ok(dbmessage) = DBMessage::parse(&bytes) {
+        eprintln!("{:?}", dbmessage);
+    } else {
+        return Err("LibraryHandler failed parsing network package from client.")
+    }
+
     if let Ok(request) = Request::parse(bytes, client_context, player_state) {
         Ok(match request {
             Request::Initiate(response) => Response::Initiate(response),
