@@ -288,7 +288,7 @@ impl Client {
         let message_socket_ref: LockedUdpSocket = Arc::new(Mutex::new(message_socket));
 
         let _broadcast_handler = Self::broadcast_handler(socket, &tx);
-        // This broadcast handler annonces this applications presense on the network.
+        // This broadcast handler announce this applications presence on the network.
         let _broadcast_sender_handler = Self::broadcast_sender_handler(self.state());
 
         // This handler is responsible for reading packages arriving on port 50002

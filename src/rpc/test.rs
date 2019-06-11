@@ -105,7 +105,7 @@ fn it_can_match_programs_and_procedures() {
 }
 
 #[test]
-fn it_will_fail_if_message_type_is_reply() {
+fn fail_if_message_type_is_reply() {
     let mut buffer = [0x00; 76];
     buffer[7] = 0x01;
 
@@ -113,7 +113,7 @@ fn it_will_fail_if_message_type_is_reply() {
 }
 
 #[test]
-fn it_will_unmarshall_into_rpc_enum() {
+fn unmarshall_into_rpc_enum() {
     let mut buffer = [0x00; 76];
     set_rpc_version_2(&mut buffer);
     buffer[13] = 0x01;
@@ -144,7 +144,6 @@ fn it_will_unmarshall_into_rpc_enum() {
                         _ => false,
                     }
                 },
-                _ => false,
             }
         },
         _ => false,

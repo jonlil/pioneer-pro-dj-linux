@@ -146,13 +146,13 @@ mod test {
             DBMessage::request_type(&[DBFieldType::U16 as u8, 0x00, 0x00]),
         );
 
-        /// Verify parsing only 3 bytes (size identifier + u16)
+        // Verify parsing only 3 bytes (size identifier + u16)
         assert_eq!(
             Ok((&[0x00][..], DBRequestType::Setup)),
             DBMessage::request_type(&[DBFieldType::U16 as u8, 0x00, 0x00, 0x00]),
         );
 
-        /// Verify matching unknown packages (and that data is kept for debug
+        // Verify matching unknown packages (and that data is kept for debug
         assert_eq!(
             Ok((&[][..], DBRequestType::Unknown(255_u16))),
             DBMessage::request_type(&[DBFieldType::U16 as u8, 0x00, 0xff]),
@@ -208,7 +208,7 @@ mod test {
             0x00, 0x00, 0x11, 0x00, 0xff, 0xff, 0xff,
         ];
 
-        /// First byte is consumed so skip that when asserting
+        // First byte is consumed so skip that when asserting
         assert_eq!(
             Err(nom::Err::Error((&message[1..], nom::error::ErrorKind::Tag))),
             DBMessage::parse(&message),
