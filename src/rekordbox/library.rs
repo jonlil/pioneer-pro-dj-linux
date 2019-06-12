@@ -253,8 +253,6 @@ impl Request {
         if input.len() == 5 {
             Ok(Request::Initiate(input.freeze()))
         } else if is_library_browsing_request(&input[0..=5]) {
-            eprintln!("{:?}", DBMessage::parse(&input.clone()));
-
             Ok(match input.len() {
                 37 => Request::Initiate(
                     Bytes::from(vec![
@@ -316,7 +314,7 @@ fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: 
     if let Ok(dbmessage) = DBMessage::parse(&bytes) {
         eprintln!("{:?}", dbmessage);
     } else {
-        return Err("LibraryHandler failed parsing network package from client.")
+        eprintln!("{:?}", bytes);
     }
 
     if let Ok(request) = Request::parse(bytes, client_context, player_state) {
@@ -337,39 +335,36 @@ struct LibraryClientHandler;
 impl LibraryClientHandler {
     fn spawn(address: &SocketAddr, context: SharedClientContext) -> Result<(), io::Error> {
         let listener = TcpListener::bind(address)?;
+        let done = listener
+            .incoming()
+            .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
+            .for_each(move |socket| {
+                let mut player_state = PlayerState {
+                    current_page: None,
+                };
+                let framed = BytesCodec::new().framed(socket);
+                let (writer, reader) = framed.split();
+                let context = context.clone();
 
-        tokio::run({
-            listener
-                .incoming()
-                .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
-                .for_each(move |socket| {
-                    let mut player_state = PlayerState {
-                        current_page: None,
-                    };
-                    let framed = BytesCodec::new().framed(socket);
-                    let (writer, reader) = framed.split();
-                    let context = context.clone();
+                let responses = reader.map(move |bytes| {
+                    let context = &context;
+                    match process(bytes, context, &mut player_state) {
+                        Ok(Response::Initiate(response)) => response,
+                        Ok(Response::Unimplemented(response)) => response,
+                        Err(err) => Bytes::from(err),
+                    }
+                });
 
-                    let responses = reader.map(move |bytes| {
-                        let context = &context;
-                        match process(bytes, context, &mut player_state) {
-                            Ok(Response::Initiate(response)) => response,
-                            Ok(Response::Unimplemented(response)) => response,
-                            Err(err) => Bytes::from(err),
-                        }
-                    });
+                let writes = responses.fold(writer, |writer, response| {
+                    writer.send(response)
+                });
 
-                    let writes = responses.fold(writer, |writer, response| {
-                        writer.send(response)
-                    });
+                let processor = writes.then(move |_w| Ok(()));
 
-                    let msg = writes.then(move |_w| Ok(()));
+                tokio::spawn(processor)
+            });
 
-                    tokio::spawn(msg)
-                })
-        });
-
-        Ok(())
+        Ok(tokio::run(done))
     }
 }
 
@@ -434,11 +429,16 @@ impl Future for InitializeClientLibraryHandler {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), self.port);
+        let port = self.port.to_owned();
+        let client_context = self.client_context.clone();
 
-        match LibraryClientHandler::spawn(&address, self.client_context.clone()) {
-            Ok(_) => Ok(Async::Ready(())),
-            Err(err) => Err(err),
-        }
+        thread::spawn(move || {
+            LibraryClientHandler::spawn(
+                &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port),
+                client_context,
+            );
+        });
+
+        Ok(Async::Ready(()))
     }
 }
