@@ -49,6 +49,7 @@ impl<'a> DBMessage<'a> {
 
         let request_type: DBMessageResultType<u16> = be_u16(input);
         match request_type {
+            Ok((input, 12288_u16)) => Ok((input, DBRequestType::RenderRequest)),
             Ok((input, 4096_u16)) => Ok((input, DBRequestType::RootMenuRequest)),
             Ok((input, 4097_u16)) => Ok((input, DBRequestType::GenreRequest)),
             Ok((input, 4098_u16)) => Ok((input, DBRequestType::ArtistRequest)),
@@ -101,6 +102,7 @@ impl<'a> DBMessage<'a> {
 #[derive(Debug, PartialEq)]
 enum DBRequestType {
     Setup,
+    RenderRequest,
     RootMenuRequest,
     GenreRequest,
     ArtistRequest,

@@ -180,7 +180,9 @@ impl Client {
     }
 
     fn library_handler(_state_ref: LockedClientState) {
-        DBLibraryServer::run();
+        thread::spawn(|| {
+            DBLibraryServer::run();
+        });
     }
 
     // TODO: Break out this to RPC::Server
