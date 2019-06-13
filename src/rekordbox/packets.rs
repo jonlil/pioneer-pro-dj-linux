@@ -20,11 +20,11 @@ enum DBFieldType {
 
 #[derive(Debug, PartialEq)]
 pub struct DBMessage<'a> {
-    transaction_id: u32,
-    request_type: DBRequestType,
-    argument_count: u8,
-    arg_types: &'a [u8],
-    args: Vec<&'a [u8]>,
+    pub transaction_id: u32,
+    pub request_type: DBRequestType,
+    pub argument_count: u8,
+    pub arg_types: &'a [u8],
+    pub args: Vec<&'a [u8]>,
 }
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
@@ -49,16 +49,21 @@ impl<'a> DBMessage<'a> {
 
         let request_type: DBMessageResultType<u16> = be_u16(input);
         match request_type {
-            Ok((input, 12288_u16)) => Ok((input, DBRequestType::RenderRequest)),
+            Ok((input, 0_u16))    => Ok((input, DBRequestType::Setup)),
             Ok((input, 4096_u16)) => Ok((input, DBRequestType::RootMenuRequest)),
             Ok((input, 4097_u16)) => Ok((input, DBRequestType::GenreRequest)),
             Ok((input, 4098_u16)) => Ok((input, DBRequestType::ArtistRequest)),
             Ok((input, 4099_u16)) => Ok((input, DBRequestType::AlbumRequest)),
-            Ok((input, 4357_u16)) => Ok((input, DBRequestType::PlaylistRequest)),
             Ok((input, 4100_u16)) => Ok((input, DBRequestType::TitleRequest)),
             Ok((input, 4114_u16)) => Ok((input, DBRequestType::HistoryRequest)),
-            Ok((input, 0_u16))    => Ok((input, DBRequestType::Setup)),
-            Ok((input, data))     => Ok((input, DBRequestType::Unknown(data))),
+            Ok((input, 4116_u16)) => Ok((input, DBRequestType::KeyRequest)),
+            Ok((input, 4357_u16)) => Ok((input, DBRequestType::PlaylistRequest)),
+            Ok((input, 4864_u16)) => Ok((input, DBRequestType::SearchQueryRequest)),
+            Ok((input, 12288_u16)) => Ok((input, DBRequestType::RenderRequest)),
+            Ok((input, data))     => {
+                eprintln!("{:?}", input);
+                Ok((input, DBRequestType::Unknown(data)))
+            },
             Err(err)              => Err(err),
         }
     }
@@ -100,7 +105,7 @@ impl<'a> DBMessage<'a> {
 }
 
 #[derive(Debug, PartialEq)]
-enum DBRequestType {
+pub enum DBRequestType {
     Setup,
     RenderRequest,
     RootMenuRequest,
@@ -108,7 +113,9 @@ enum DBRequestType {
     ArtistRequest,
     AlbumRequest,
     TitleRequest,
+    KeyRequest,
     PlaylistRequest,
+    SearchQueryRequest,
     HistoryRequest,
     Unknown(u16),
 }
@@ -166,6 +173,27 @@ mod test {
         assert_eq!(
             Ok((&[][..], 3_u8)),
             DBMessage::argument_count(&[DBFieldType::U8 as u8, 0x03]),
+        );
+    }
+
+    #[test]
+    fn parse_dbmessage_SetupRequest() {
+        let message = [
+            0x11,0x87,0x23,0x49,0xae,0x11,0xff,0xff,
+            0xff,0xfe,0x10,0x00,0x00,0x0f,0x01,0x14,
+            0x00,0x00,0x00,0x0c,0x06,0x00,0x00,0x00,
+            0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+            0x11,0x00,0x00,0x00,0x02,
+        ];
+        let parsed_message = DBMessage::parse(&message);
+        assert_eq!(DBRequestType::Setup, parsed_message.unwrap().1.request_type);
+    }
+
+    #[test]
+    fn parse_test_library_handler() {
+        assert_eq!(
+            Err(nom::Err::Error((&[0, 0, 0, 1][..], nom::error::ErrorKind::Tag))),
+            DBMessage::parse(b"\x11\x00\x00\x00\x01"),
         );
     }
 

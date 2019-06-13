@@ -33,7 +33,7 @@ impl EventHandler {
 
 impl rpc::server::EventHandler for EventHandler {
     fn on_event(&self, name: &str, socket: &UdpSocket, receiver: SocketAddr, rpc_program: RPC) {
-        if self.callbacks.contains_key(name) == true {
+        if self.callbacks.contains_key(name) {
             self.callbacks[name](socket, receiver, rpc_program, &self.state);
         }
     }
@@ -84,7 +84,7 @@ fn rpc_procedure_export(
                     payload.extend(NO_VALUE_FOLLOWS.to_vec());
 
                     match send_rpc_reply(&socket, &receiver, call.to_reply(vec![payload])) {
-                        Ok(nob) => eprintln!("Successfully sent Mount::Export reply with bytes: {}", nob),
+                        Ok(_) => {},
                         Err(_) => {},
                     }
                 }
@@ -109,7 +109,7 @@ fn rpc_procedure_mnt(
             payload.extend([0u8; 32].to_vec());
 
             match send_rpc_reply(&socket, &receiver, call.to_reply(vec![payload])) {
-                Ok(nob) => eprintln!("Successfully sent Mount::Mnt reply with bytes: {}", nob),
+                Ok(_) => {},
                 Err(_) => {},
             }
         },

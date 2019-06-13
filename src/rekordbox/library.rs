@@ -311,8 +311,9 @@ impl ClientContext {
 }
 
 fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: &mut PlayerState) -> Result<Response, &'static str> {
-    if let Ok(dbmessage) = DBMessage::parse(&bytes) {
-        eprintln!("{:?}", dbmessage);
+    if let Ok((unprocessed_bytes, dbmessage)) = DBMessage::parse(&bytes) {
+        eprintln!("{:?}", dbmessage.request_type);
+        eprintln!("bytes_left: {:?}", unprocessed_bytes);
     } else {
         eprintln!("{:?}", bytes);
     }

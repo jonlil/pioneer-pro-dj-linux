@@ -115,7 +115,7 @@ impl RPCServer {
             });
 
             match self.socket.send_to(reply.as_ref(), receiver) {
-                Ok(nob) => eprintln!("RPC Portmapping accept package sent {:?}", nob),
+                Ok(_) => {},
                 Err(error) => eprintln!("{:?}", error),
             }
         };
