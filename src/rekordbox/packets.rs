@@ -19,6 +19,13 @@ enum DBFieldType {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct DBField<'a> {
+    kind: DBFieldType,
+    value: &'a [u8],
+}
+
+
+#[derive(Debug, PartialEq)]
 pub struct DBMessage<'a> {
     pub transaction_id: u32,
     pub request_type: DBRequestType,
