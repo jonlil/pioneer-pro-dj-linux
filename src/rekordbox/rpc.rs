@@ -74,7 +74,7 @@ fn rpc_procedure_export(
                                 ip,
                                 mask,
                             ).bytes().collect();
-                            payload.extend(vec![0x00, 0x00, 0x00, 0x1A]);
+                            payload.extend(vec![0x00, 0x00, 0x00, 0x1a]);
                             payload.extend(group_value);
                         },
                         _ => panic!("IPv6 is not supported"),

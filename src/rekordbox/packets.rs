@@ -2,6 +2,7 @@ use nom::multi::count;
 use nom::bytes::complete::{tag, take};
 use nom::number::complete::{be_u32, be_u16, be_u8};
 use nom::IResult;
+use bytes::{Bytes, BytesMut};
 
 #[derive(Debug, PartialEq)]
 enum Error {
@@ -10,18 +11,40 @@ enum Error {
 
 #[derive(Debug, PartialEq)]
 enum DBFieldType {
-  U8 = 0x0f,
-  U16 = 0x10,
-  U32 = 0x11,
-  Binary = 0x14,
-  String = 0x26,
-  Unknown,
+  U8,
+  U16,
+  U32,
+  Binary,
+  String,
+}
+
+impl DBFieldType {
+    pub fn value(&self) -> u8 {
+        match *self {
+            DBFieldType::U8 => 0x0f,
+            DBFieldType::U16 => 0x10,
+            DBFieldType::U32 => 0x11,
+            DBFieldType::Binary => 0x14,
+            DBFieldType::String => 0x25,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct DBField<'a> {
     kind: DBFieldType,
     value: &'a [u8],
+}
+
+impl<'a> DBField<'a> {
+    fn as_bytes(&self) -> Bytes {
+        let mut bytes = Bytes::from(vec![]);
+
+        bytes.extend(vec![self.kind.value()]);
+        bytes.extend(self.value.to_vec());
+
+        bytes
+    }
 }
 
 
@@ -31,7 +54,7 @@ pub struct DBMessage<'a> {
     pub request_type: DBRequestType,
     pub argument_count: u8,
     pub arg_types: &'a [u8],
-    pub args: Vec<&'a [u8]>,
+    pub args: Vec<DBField<'a>>,
 }
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
@@ -71,7 +94,7 @@ impl<'a> DBMessage<'a> {
                 eprintln!("{:?}", input);
                 Ok((input, DBRequestType::Unknown(data)))
             },
-            Err(err)              => Err(err),
+            Err(err) => Err(err),
         }
     }
 
@@ -86,11 +109,21 @@ impl<'a> DBMessage<'a> {
     }
 
     pub fn parse(i: &[u8]) -> IResult<&[u8], DBMessage> {
-        fn parse_arguments(input: &[u8]) -> IResult<&[u8], &[u8]> {
+        fn parse_arguments(input: &[u8]) -> IResult<&[u8], DBField> {
             match be_u8(input) {
                 Err(err) => Err(err),
-                Ok((input, 0x11)) => take(4u8)(input),
-                Ok((input, _consumed)) => Ok((input, &[])),
+                Ok((input, 0x11)) => {
+                    match take(4u8)(input) {
+                        Ok((input, value)) => {
+                            Ok((input, DBField {
+                                kind: DBFieldType::U32,
+                                value: value,
+                            }))
+                        },
+                        Err(err) => Err(err),
+                    }
+                },
+                Ok((_input, _consumed)) => Err(nom::Err::Error((&[], nom::error::ErrorKind::Tag))),
             }
         }
 
@@ -129,7 +162,7 @@ pub enum DBRequestType {
 
 #[cfg(test)]
 mod test {
-    use super::{DBMessage, DBFieldType, DBRequestType};
+    use super::{DBMessage, DBFieldType, DBRequestType, DBField};
 
     #[test]
     fn extract_magic_from_db_message() {
@@ -184,15 +217,15 @@ mod test {
     }
 
     #[test]
-    fn parse_dbmessage_SetupRequest() {
-        let message = [
+    fn parse_dbmessage_setup_request() {
+        let parsed_message = DBMessage::parse(&[
             0x11,0x87,0x23,0x49,0xae,0x11,0xff,0xff,
             0xff,0xfe,0x10,0x00,0x00,0x0f,0x01,0x14,
             0x00,0x00,0x00,0x0c,0x06,0x00,0x00,0x00,
             0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
             0x11,0x00,0x00,0x00,0x02,
-        ];
-        let parsed_message = DBMessage::parse(&message);
+        ]);
+
         assert_eq!(DBRequestType::Setup, parsed_message.unwrap().1.request_type);
     }
 
@@ -225,9 +258,18 @@ mod test {
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 ],
                 args: vec![
-                    &[0x02, 0x01, 0x04, 0x01],
-                    &[0x00, 0x00, 0x00, 0x00],
-                    &[0x00, 0xff, 0xff, 0xff],
+                    DBField {
+                        kind: DBFieldType::U32,
+                        value: &[0x02, 0x01, 0x04, 0x01],
+                    },
+                    DBField {
+                        kind: DBFieldType::U32,
+                        value: &[0x00, 0x00, 0x00, 0x00],
+                    },
+                    DBField {
+                        kind: DBFieldType::U32,
+                        value: &[0x00, 0xff, 0xff, 0xff],
+                    },
                 ],
             })),
             DBMessage::parse(&message),
@@ -253,6 +295,19 @@ mod test {
     }
 
     #[test]
-    fn parse_db_field_type() {
+    fn encode_db_field_to_bytes() {
+        assert_eq!(
+            b"\x0f\x32",
+            &DBField { kind: DBFieldType::U8, value: &[0x32] }.as_bytes()[..],
+        );
+
+        assert_eq!(
+            b"\x10\x12\x13",
+            &DBField { kind: DBFieldType::U16, value: &[0x12, 0x13] }.as_bytes()[..],
+        );
+        assert_eq!(
+            b"\x11\x00\x00\x00\x01",
+            &DBField { kind: DBFieldType::U32, value: &[0x00, 0x00, 0x00, 0x01] }.as_bytes()[..],
+        );
     }
 }
