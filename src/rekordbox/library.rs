@@ -15,7 +15,7 @@ use tokio::prelude::*;
 use bytes::{Bytes, BytesMut};
 
 use crate::rpc::server::convert_u16_to_two_u8s_be;
-use super::packets::DBMessage;
+use super::packets::{DBMessage, DBRequestType, DBField, DBFieldType};
 
 struct PlayerState {
     current_page: Option<u8>,
@@ -234,10 +234,43 @@ enum Request {
     FetchListItemContent(Bytes),
     Unimplemented,
 }
-#[derive(Debug)]
-enum Response {
-    Initiate(Bytes),
-    Unimplemented(Bytes),
+
+trait DBMessageResponseTrait {
+    type Item;
+    fn to_response(self, request: DBMessage, context: &SharedClientContext) -> Self::Item;
+}
+
+struct DBMessageRequest<'a, T: DBMessageResponseTrait> {
+    request: DBMessage<'a>,
+    response: T,
+    context: &'a SharedClientContext,
+}
+
+impl<'a, T: DBMessageResponseTrait> DBMessageRequest<'a, T> {
+    fn response(self) -> T::Item {
+        self.response.to_response(self.request, self.context)
+    }
+}
+
+struct DBMessageSetupResponse;
+impl DBMessageResponseTrait for DBMessageSetupResponse {
+    type Item = Bytes;
+
+    fn to_response(self, request: DBMessage, _context: &SharedClientContext) -> Self::Item {
+        let mut bytes: BytesMut = request.to_response();
+
+        bytes.extend(vec![0x10, 0x40, 0x00]);
+        bytes.extend(vec![
+            0x0f, 0x02,
+            0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+
+        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x00]).as_bytes());
+        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x11]).as_bytes());
+
+        Bytes::from(bytes)
+    }
 }
 
 fn is_library_browsing_request(bytes: &[u8]) -> bool {
@@ -254,16 +287,6 @@ impl Request {
             Ok(Request::Initiate(input.freeze()))
         } else if is_library_browsing_request(&input[0..=5]) {
             Ok(match input.len() {
-                37 => Request::Initiate(
-                    Bytes::from(vec![
-                        0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0xff, 0xff,
-                        0xff, 0xfe, 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
-                        0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        0x11, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00,
-                        0x00, 0x11,
-                    ])
-                ),
                 47 => {
                     Request::Initiate(Bytes::from(vec![
                         0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
@@ -301,6 +324,7 @@ impl Request {
     }
 }
 
+
 type SharedClientContext = Arc<ClientContext>;
 struct ClientContext;
 
@@ -310,20 +334,31 @@ impl ClientContext {
     }
 }
 
-fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: &mut PlayerState) -> Result<Response, &'static str> {
+fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: &mut PlayerState) -> Result<Bytes, &'static str> {
+    fn map_request_type_to_response_handler(request_type: &DBRequestType) -> Result<impl DBMessageResponseTrait<Item = Bytes>, &'static str> {
+        match request_type {
+            DBRequestType::Setup => Ok(DBMessageSetupResponse {}),
+            _ => Err("Unhandled"),
+        }
+    }
+
     if let Ok((unprocessed_bytes, dbmessage)) = DBMessage::parse(&bytes) {
-        eprintln!("{:?}", dbmessage.request_type);
-        eprintln!("bytes_left: {:?}", unprocessed_bytes);
-    } else {
-        eprintln!("{:?}", bytes);
+        // delegate to controller
+        if let Ok(response_handler) = map_request_type_to_response_handler(&dbmessage.request_type) {
+            return Ok(DBMessageRequest {
+                request: dbmessage,
+                response: response_handler,
+                context: client_context,
+            }.response())
+        }
     }
 
     if let Ok(request) = Request::parse(bytes, client_context, player_state) {
         Ok(match request {
-            Request::Initiate(response) => Response::Initiate(response),
-            Request::QueryListItem(response) => Response::Initiate(response),
-            Request::FetchListItemContent(response) => Response::Initiate(response),
-            Request::Unimplemented => Response::Unimplemented(Bytes::from("Unimplemented")),
+            Request::Initiate(response) => response,
+            Request::QueryListItem(response) => response,
+            Request::FetchListItemContent(response) => response,
+            Request::Unimplemented => Bytes::from("Unimplemented"),
         })
     } else {
         Err("Failed processing request into response")
@@ -350,8 +385,7 @@ impl LibraryClientHandler {
                 let responses = reader.map(move |bytes| {
                     let context = &context;
                     match process(bytes, context, &mut player_state) {
-                        Ok(Response::Initiate(response)) => response,
-                        Ok(Response::Unimplemented(response)) => response,
+                        Ok(response) => response,
                         Err(err) => Bytes::from(err),
                     }
                 });
@@ -374,6 +408,8 @@ impl DBLibraryServer {
     fn spawn(address: &str, client_context: SharedClientContext) {
         let addr = address.parse::<SocketAddr>().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
+
+        // TODO: Just use a random port, easier to just let the os manage this.
         let mut tcp_port_pool: Vec<u16> = vec![65312, 65313, 65314, 65315];
 
         let done = listener
@@ -441,5 +477,51 @@ impl Future for InitializeClientLibraryHandler {
         });
 
         Ok(Async::Ready(()))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::super::packets::fixtures;
+    use super::{
+        DBMessageRequest,
+        DBMessage,
+        DBMessageResponseTrait,
+        SharedClientContext,
+        ClientContext,
+        DBMessageSetupResponse,
+    };
+    use std::sync::Arc;
+    use bytes::Bytes;
+
+    pub struct TestDBMessageResponse;
+    impl DBMessageResponseTrait for TestDBMessageResponse {
+        type Item = Bytes;
+
+        fn to_response(self, request: DBMessage, context: &SharedClientContext) -> Self::Item {
+            Bytes::from("my-very-test-value")
+        }
+    }
+
+    #[test]
+    fn test_response_trait() {
+        let request_handler = DBMessageRequest {
+            request: fixtures::setup_request_packet().unwrap().1,
+            response: TestDBMessageResponse {},
+            context: &Arc::new(ClientContext::new()),
+        };
+
+        assert_eq!(request_handler.response(), Bytes::from("my-very-test-value"));
+    }
+
+    #[test]
+    fn test_response_to_setup_request() {
+        let request_handler = DBMessageRequest {
+            request: fixtures::setup_request_packet().unwrap().1,
+            response: DBMessageSetupResponse {},
+            context: &Arc::new(ClientContext::new()),
+        };
+
+        assert_eq!(request_handler.response(), fixtures::setup_response_packet());
     }
 }
