@@ -16,6 +16,7 @@ use bytes::{Bytes, BytesMut};
 
 use crate::rpc::server::convert_u16_to_two_u8s_be;
 use super::packets::{DBMessage, DBRequestType, DBField, DBFieldType};
+use super::player::Player;
 
 struct PlayerState {
     current_page: Option<u8>,
@@ -235,31 +236,55 @@ enum Request {
     Unimplemented,
 }
 
-trait DBMessageResponseTrait {
+trait ControllerTrait {
     type Item;
-    fn to_response(self, request: DBMessage, context: &SharedClientContext) -> Self::Item;
+    fn to_response(self, request: RequestWrapper, context: &SharedClientContext) -> Self::Item;
 }
 
-struct DBMessageRequest<'a, T: DBMessageResponseTrait> {
-    request: DBMessage<'a>,
-    response: T,
-    context: &'a SharedClientContext,
+struct RequestWrapper<'a> {
+    message: DBMessage<'a>,
 }
 
-impl<'a, T: DBMessageResponseTrait> DBMessageRequest<'a, T> {
-    fn response(self) -> T::Item {
-        self.response.to_response(self.request, self.context)
+impl <'a>RequestWrapper<'a> {
+    fn to_response(self) -> BytesMut {
+        self.message.to_response()
     }
 }
 
-struct DBMessageSetupResponse;
-impl DBMessageResponseTrait for DBMessageSetupResponse {
+struct RequestHandler<'a, T: ControllerTrait> {
+    request: RequestWrapper<'a>,
+    controller: T,
+    context: &'a SharedClientContext,
+}
+
+impl<'a, T: ControllerTrait> RequestHandler<'a, T> {
+    pub fn new(request_handler: T, message: DBMessage<'a>, context: &'a SharedClientContext) -> RequestHandler<'a, T> {
+        RequestHandler {
+            request: RequestWrapper {
+                message: message,
+            },
+            controller: request_handler,
+            context: context,
+        }
+    }
+
+    fn respond_to(self) -> T::Item {
+        self.controller.to_response(self.request, self.context)
+    }
+}
+
+fn ok_request() -> Bytes {
+    DBField::new(DBFieldType::U16, &[0x40, 0x00]).as_bytes()
+}
+
+struct SetupController;
+impl ControllerTrait for SetupController {
     type Item = Bytes;
 
-    fn to_response(self, request: DBMessage, _context: &SharedClientContext) -> Self::Item {
+    fn to_response(self, request: RequestWrapper, _context: &SharedClientContext) -> Self::Item {
         let mut bytes: BytesMut = request.to_response();
 
-        bytes.extend(vec![0x10, 0x40, 0x00]);
+        bytes.extend(ok_request());
         bytes.extend(vec![
             0x0f, 0x02,
             0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
@@ -268,6 +293,38 @@ impl DBMessageResponseTrait for DBMessageSetupResponse {
 
         bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x00]).as_bytes());
         bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x11]).as_bytes());
+
+        Bytes::from(bytes)
+    }
+}
+
+struct RootMenuController;
+impl ControllerTrait for RootMenuController {
+    type Item = Bytes;
+
+    fn to_response(self, request: RequestWrapper, _context: &SharedClientContext) -> Self::Item {
+        let mut bytes: BytesMut = request.to_response();
+
+        bytes.extend(ok_request());
+        bytes.extend(vec![
+            0x0f, 0x02,
+            0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ]);
+
+        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x10, 0x00]).as_bytes());
+        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x08]).as_bytes());
+
+        Bytes::from(bytes)
+    }
+}
+
+struct ArtistController;
+impl ControllerTrait for ArtistController {
+    type Item = Bytes;
+
+    fn to_response(self, request: RequestWrapper, _context: &SharedClientContext) -> Self::Item {
+        let mut bytes: BytesMut = request.to_response();
 
         Bytes::from(bytes)
     }
@@ -287,16 +344,6 @@ impl Request {
             Ok(Request::Initiate(input.freeze()))
         } else if is_library_browsing_request(&input[0..=5]) {
             Ok(match input.len() {
-                47 => {
-                    Request::Initiate(Bytes::from(vec![
-                        0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
-                        input[8], input[9], 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
-                        0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        0x11, 0x00, 0x00, 0x10, 0x00, 0x11, 0x00, 0x00,
-                        0x00, 0x08
-                    ]))
-                },
                 42 => {
                     Request::QueryListItem(Bytes::from(vec![
                         0x11, 0x87, 0x23, 0x49, 0xae,
@@ -334,22 +381,38 @@ impl ClientContext {
     }
 }
 
-fn process(bytes: BytesMut, client_context: &SharedClientContext, player_state: &mut PlayerState) -> Result<Bytes, &'static str> {
-    fn map_request_type_to_response_handler(request_type: &DBRequestType) -> Result<impl DBMessageResponseTrait<Item = Bytes>, &'static str> {
-        match request_type {
-            DBRequestType::Setup => Ok(DBMessageSetupResponse {}),
-            _ => Err("Unhandled"),
-        }
-    }
-
-    if let Ok((unprocessed_bytes, dbmessage)) = DBMessage::parse(&bytes) {
+fn process(
+    bytes: BytesMut,
+    client_context: &SharedClientContext,
+    player_state: &mut PlayerState,
+) -> Result<Bytes, &'static str> {
+    if let Ok((_unprocessed_bytes, dbmessage)) = DBMessage::parse(&bytes) {
         // delegate to controller
-        if let Ok(response_handler) = map_request_type_to_response_handler(&dbmessage.request_type) {
-            return Ok(DBMessageRequest {
-                request: dbmessage,
-                response: response_handler,
-                context: client_context,
-            }.response())
+        // TODO: Implement dynamic dispatch
+        match dbmessage.request_type {
+            DBRequestType::RootMenuRequest => {
+                return Ok(
+                    RequestHandler::new(
+                        RootMenuController {}, dbmessage, client_context
+                    ).respond_to()
+                )
+            },
+            DBRequestType::Setup => {
+                return Ok(
+                    RequestHandler::new(
+                        SetupController {}, dbmessage, client_context
+                    ).respond_to()
+                )
+            },
+            _ => {
+                eprintln!("
+                    request_type => {:?}
+                    arguments => {:?}
+                    ",
+                    dbmessage.request_type,
+                    dbmessage.args,
+                );
+            },
         }
     }
 
@@ -482,46 +545,64 @@ impl Future for InitializeClientLibraryHandler {
 
 #[cfg(test)]
 mod test {
-    use super::super::packets::fixtures;
-    use super::{
-        DBMessageRequest,
-        DBMessage,
-        DBMessageResponseTrait,
-        SharedClientContext,
-        ClientContext,
-        DBMessageSetupResponse,
-    };
     use std::sync::Arc;
     use bytes::Bytes;
 
-    pub struct TestDBMessageResponse;
-    impl DBMessageResponseTrait for TestDBMessageResponse {
+    use super::super::packets::fixtures;
+    use super::{
+        RequestHandler,
+        RequestWrapper,
+        SharedClientContext,
+        ClientContext,
+    };
+    use super::{
+        ControllerTrait,
+        SetupController,
+        RootMenuController,
+    };
+
+    pub struct TestController;
+    impl ControllerTrait for TestController {
         type Item = Bytes;
 
-        fn to_response(self, request: DBMessage, context: &SharedClientContext) -> Self::Item {
+        fn to_response(self, request: RequestWrapper, context: &SharedClientContext) -> Self::Item {
             Bytes::from("my-very-test-value")
         }
     }
 
     #[test]
-    fn test_response_trait() {
-        let request_handler = DBMessageRequest {
-            request: fixtures::setup_request_packet().unwrap().1,
-            response: TestDBMessageResponse {},
-            context: &Arc::new(ClientContext::new()),
-        };
+    fn test_controller_trait() {
+        let context = Arc::new(ClientContext::new());
+        let request_handler = RequestHandler::new(
+            TestController {},
+            fixtures::setup_request_packet().unwrap().1,
+            &context,
+        );
 
-        assert_eq!(request_handler.response(), Bytes::from("my-very-test-value"));
+        assert_eq!(request_handler.respond_to(), Bytes::from("my-very-test-value"));
     }
 
     #[test]
-    fn test_response_to_setup_request() {
-        let request_handler = DBMessageRequest {
-            request: fixtures::setup_request_packet().unwrap().1,
-            response: DBMessageSetupResponse {},
-            context: &Arc::new(ClientContext::new()),
-        };
+    fn test_setup_request_handling() {
+        let context = Arc::new(ClientContext::new());
+        let request_handler = RequestHandler::new(
+            SetupController {},
+            fixtures::setup_request_packet().unwrap().1,
+            &context,
+        );
 
-        assert_eq!(request_handler.response(), fixtures::setup_response_packet());
+        assert_eq!(request_handler.respond_to(), fixtures::setup_response_packet());
+    }
+
+    #[test]
+    fn test_root_menu_request_handling() {
+        let context = Arc::new(ClientContext::new());
+        let request_handler = RequestHandler::new(
+            RootMenuController {},
+            fixtures::root_menu_request().unwrap().1,
+            &context,
+        );
+
+        assert_eq!(request_handler.respond_to(), fixtures::root_menu_response_packet());
     }
 }
