@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::rpc::{RPC, self};
-use super::client::{LockedClientState};
+use super::state::{LockedClientState};
 use std::net::{UdpSocket, SocketAddr, IpAddr};
 use std::io::Error;
 

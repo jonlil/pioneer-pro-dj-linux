@@ -80,6 +80,7 @@ pub struct DBMessage<'a> {
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
 type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
+pub type WrappedDBMessage<'a> = IResult<&'a [u8], DBMessage<'a>>;
 
 impl<'a> DBMessage<'a> {
     const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
