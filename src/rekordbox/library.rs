@@ -63,9 +63,8 @@ enum Request {
     Unimplemented,
 }
 
-trait ControllerTrait {
-    type Item;
-    fn to_response(self, request: RequestWrapper, context: &SharedClientContext) -> Self::Item;
+trait Controller {
+    fn to_response(&self, request: RequestWrapper, context: &SharedClientContext) -> Bytes;
 }
 
 struct RequestWrapper<'a> {
@@ -73,29 +72,35 @@ struct RequestWrapper<'a> {
 }
 
 impl <'a>RequestWrapper<'a> {
+    pub fn new(message: DBMessage) -> RequestWrapper {
+        RequestWrapper { message: message }
+    }
+
     fn to_response(self) -> BytesMut {
         self.message.to_response()
     }
 }
 
-struct RequestHandler<'a, T: ControllerTrait> {
+struct RequestHandler<'a> {
     request: RequestWrapper<'a>,
-    controller: T,
+    controller: Box<Controller>,
     context: &'a SharedClientContext,
 }
 
-impl<'a, T: ControllerTrait> RequestHandler<'a, T> {
-    pub fn new(request_handler: T, message: DBMessage<'a>, context: &'a SharedClientContext) -> RequestHandler<'a, T> {
+impl <'a>RequestHandler<'a> {
+    pub fn new(
+        request_handler: Box<Controller>,
+        message: DBMessage<'a>,
+        context: &'a SharedClientContext
+    ) -> RequestHandler<'a> {
         RequestHandler {
-            request: RequestWrapper {
-                message: message,
-            },
+            request: RequestWrapper::new(message),
             controller: request_handler,
             context: context,
         }
     }
 
-    fn respond_to(self) -> T::Item {
+    fn respond_to(self) -> Bytes {
         self.controller.to_response(self.request, self.context)
     }
 }
@@ -105,10 +110,8 @@ fn ok_request() -> Bytes {
 }
 
 struct SetupController;
-impl ControllerTrait for SetupController {
-    type Item = Bytes;
-
-    fn to_response(self, request: RequestWrapper, _context: &SharedClientContext) -> Self::Item {
+impl Controller for SetupController {
+    fn to_response(&self, request: RequestWrapper, _context: &SharedClientContext) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
@@ -126,10 +129,8 @@ impl ControllerTrait for SetupController {
 }
 
 struct RootMenuController;
-impl ControllerTrait for RootMenuController {
-    type Item = Bytes;
-
-    fn to_response(self, request: RequestWrapper, _context: &SharedClientContext) -> Self::Item {
+impl Controller for RootMenuController {
+    fn to_response(&self, request: RequestWrapper, _context: &SharedClientContext) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
@@ -147,10 +148,8 @@ impl ControllerTrait for RootMenuController {
 }
 
 struct ArtistController;
-impl ControllerTrait for ArtistController {
-    type Item = Bytes;
-
-    fn to_response(self, request: RequestWrapper, _context: &SharedClientContext) -> Self::Item {
+impl Controller for ArtistController {
+    fn to_response(&self, request: RequestWrapper, _context: &SharedClientContext) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         Bytes::from(bytes)
@@ -208,56 +207,48 @@ impl ClientContext {
     }
 }
 
+fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
+    match request_type {
+        DBRequestType::RootMenuRequest => Some(Box::new(RootMenuController)),
+        DBRequestType::ArtistRequest => Some(Box::new(ArtistController)),
+        DBRequestType::Setup => Some(Box::new(SetupController)),
+        _ => None,
+    }
+}
+
 fn process(
     bytes: BytesMut,
     client_context: &SharedClientContext,
     player_state: &mut PlayerState,
-) -> Result<Bytes, &'static str> {
+) -> Bytes {
     if let Ok((_unprocessed_bytes, dbmessage)) = DBMessage::parse(&bytes) {
-        // delegate to controller
-        // TODO: Implement dynamic dispatch
-        match dbmessage.request_type {
-            DBRequestType::RootMenuRequest => {
-                return Ok(
-                    RequestHandler::new(
-                        RootMenuController {}, dbmessage, client_context
-                    ).respond_to()
-                )
-            },
-            DBRequestType::Setup => {
-                return Ok(
-                    RequestHandler::new(
-                        SetupController {}, dbmessage, client_context
-                    ).respond_to()
-                )
-            },
-            _ => {
-                eprintln!("
-                    request_type => {:?}
-                    arguments => {:?}
-                    ",
-                    dbmessage.request_type,
-                    dbmessage.args,
-                );
-            },
+        if let Some(request_handler) = get_controller(&dbmessage.request_type) {
+            return RequestHandler::new(request_handler, dbmessage, client_context).respond_to();
+        } else {
+            eprintln!("
+                request_type => {:?}
+                arguments => {:?}
+                ",
+                dbmessage.request_type,
+                dbmessage.args,
+            );
         }
     }
 
     if let Ok(request) = Request::parse(bytes, client_context, player_state) {
-        Ok(match request {
+        match request {
             Request::Initiate(response) => response,
             Request::QueryListItem(response) => response,
             Request::FetchListItemContent(response) => response,
             Request::Unimplemented => Bytes::from("Unimplemented"),
-        })
+        }
     } else {
-        Err("Failed processing request into response")
+        Bytes::from("Failed processing request into response")
     }
 }
 
 /// Handle library clients
 struct LibraryClientHandler;
-
 impl LibraryClientHandler {
     fn spawn(address: &SocketAddr, context: SharedClientContext) -> Result<(), io::Error> {
         let listener = TcpListener::bind(address)?;
@@ -274,10 +265,7 @@ impl LibraryClientHandler {
 
                 let responses = reader.map(move |bytes| {
                     let context = &context;
-                    match process(bytes, context, &mut player_state) {
-                        Ok(response) => response,
-                        Err(err) => Bytes::from(err),
-                    }
+                    process(bytes, context, &mut player_state)
                 });
 
                 let writes = responses.fold(writer, |writer, response| {
@@ -383,16 +371,14 @@ mod test {
         ClientContext,
     };
     use super::{
-        ControllerTrait,
+        Controller,
         SetupController,
         RootMenuController,
     };
 
     pub struct TestController;
-    impl ControllerTrait for TestController {
-        type Item = Bytes;
-
-        fn to_response(self, request: RequestWrapper, context: &SharedClientContext) -> Self::Item {
+    impl Controller for TestController {
+        fn to_response(&self, request: RequestWrapper, context: &SharedClientContext) -> Bytes {
             Bytes::from("my-very-test-value")
         }
     }
@@ -401,7 +387,7 @@ mod test {
     fn test_controller_trait() {
         let context = Arc::new(ClientContext::new());
         let request_handler = RequestHandler::new(
-            TestController {},
+            Box::new(TestController {}),
             fixtures::setup_request_packet().unwrap().1,
             &context,
         );
@@ -413,7 +399,7 @@ mod test {
     fn test_setup_request_handling() {
         let context = Arc::new(ClientContext::new());
         let request_handler = RequestHandler::new(
-            SetupController {},
+            Box::new(SetupController {}),
             fixtures::setup_request_packet().unwrap().1,
             &context,
         );
@@ -425,7 +411,7 @@ mod test {
     fn test_root_menu_request_handling() {
         let context = Arc::new(ClientContext::new());
         let request_handler = RequestHandler::new(
-            RootMenuController {},
+            Box::new(RootMenuController {}),
             fixtures::root_menu_request().unwrap().1,
             &context,
         );
