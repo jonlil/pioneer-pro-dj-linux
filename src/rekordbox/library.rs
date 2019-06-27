@@ -15,7 +15,10 @@ use tokio::io::{read_exact, write_all};
 use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
 use bytes::{Bytes, BytesMut};
-use super::state::{LockedClientState};
+use super::state::{
+    LockedClientState as LockedSharedState,
+    ClientState as SharedState
+};
 
 use crate::rpc::server::convert_u16_to_two_u8s_be;
 use super::packets::{
@@ -23,17 +26,25 @@ use super::packets::{
     DBRequestType,
     DBField,
     DBFieldType,
-    DBMessageResultType
 };
-use super::player::Player;
 
-struct PlayerState {
-    current_page: Option<u8>,
+struct ClientState {
+    previous_request: Option<DBRequestType>,
+    state: LockedSharedState,
 }
 
-pub fn client_response(mut stream: TcpStream, data: Vec<u8>) {
+impl ClientState {
+    pub fn new(state: LockedSharedState) -> Self {
+        Self {
+            previous_request: None,
+            state: state,
+        }
+    }
+}
+
+pub fn client_response(mut stream: TcpStream, data: Bytes) {
     if let Err(e) = stream.write(data.as_ref()) {
-        eprintln!("{:?}", e);
+        eprintln!("Failed responding to client: {:?}", e);
     }
 }
 
@@ -56,7 +67,10 @@ pub fn handle_client(mut stream: TcpStream) {
     match stream.read(&mut buf) {
         Ok(size) => {
             match get_package_type(&buf[..size]) {
-                Event::RemoteDBServer => client_response(stream, Library::start_page()),
+                Event::RemoteDBServer => client_response(
+                    stream,
+                    Bytes::from(vec![0xff, 0x20]),
+                ),
                 Event::Unsupported => {},
             }
         },
@@ -64,16 +78,8 @@ pub fn handle_client(mut stream: TcpStream) {
     }
 }
 
-#[derive(Debug)]
-enum Request {
-    Initiate(Bytes),
-    QueryListItem(Bytes),
-    FetchListItemContent(Bytes),
-    Unimplemented,
-}
-
 trait Controller {
-    fn to_response(&self, request: RequestWrapper, context: &SharedClientContext) -> Bytes;
+    fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes;
 }
 
 struct RequestWrapper<'a> {
@@ -93,14 +99,14 @@ impl <'a>RequestWrapper<'a> {
 struct RequestHandler<'a> {
     request: RequestWrapper<'a>,
     controller: Box<Controller>,
-    context: &'a SharedClientContext,
+    context: &'a ClientState,
 }
 
 impl <'a>RequestHandler<'a> {
     pub fn new(
         request_handler: Box<Controller>,
         message: DBMessage<'a>,
-        context: &'a SharedClientContext
+        context: &'a ClientState
     ) -> RequestHandler<'a> {
         RequestHandler {
             request: RequestWrapper::new(message),
@@ -120,7 +126,7 @@ fn ok_request() -> Bytes {
 
 struct SetupController;
 impl Controller for SetupController {
-    fn to_response(&self, request: RequestWrapper, _context: &SharedClientContext) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
@@ -139,7 +145,7 @@ impl Controller for SetupController {
 
 struct RootMenuController;
 impl Controller for RootMenuController {
-    fn to_response(&self, request: RequestWrapper, _context: &SharedClientContext) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
@@ -158,60 +164,10 @@ impl Controller for RootMenuController {
 
 struct ArtistController;
 impl Controller for ArtistController {
-    fn to_response(&self, request: RequestWrapper, _context: &SharedClientContext) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         Bytes::from(bytes)
-    }
-}
-
-fn is_library_browsing_request(bytes: &[u8]) -> bool {
-    bytes == [0x11, 0x87, 0x23, 0x49, 0xae, 0x11]
-}
-
-impl Request {
-    fn parse(
-        input: BytesMut,
-        _client_context: &SharedClientContext
-    ) -> Result<Request, &'static str> {
-        if input.len() == 5 {
-            Ok(Request::Initiate(input.freeze()))
-        } else if is_library_browsing_request(&input[0..=5]) {
-            Ok(match input.len() {
-                42 => {
-                    Request::QueryListItem(Bytes::from(vec![
-                        0x11, 0x87, 0x23, 0x49, 0xae,
-                        0x11, input[6], input[7], input[8], input[9],
-                        0x10, 0x40, 0x00,
-                        0x0f, 0x02,
-                        0x14,
-                        0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
-                        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                        0x11, 0x00, 0x00, input[11], input[12],
-                        0x11, 0x00, 0x00, 0x00, 0x02,
-                    ]))
-                },
-                62 => {
-                    Request::FetchListItemContent(Library::tbd((input[8], input[9])))
-                },
-                _ => {
-                    Request::Unimplemented
-                },
-            })
-        } else {
-            eprintln!("parsing TCP package failed; package = {:?}", input);
-            Err("parsing TCP package failed")
-        }
-    }
-}
-
-
-type SharedClientContext = LockedClientState;
-struct ClientContext;
-
-impl ClientContext {
-    pub fn new() -> Self {
-        Self {}
     }
 }
 
@@ -226,7 +182,7 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
 
 fn process(
     bytes: BytesMut,
-    client_context: &SharedClientContext,
+    client_context: &ClientState,
     peer_addr: &SocketAddr,
 ) -> Bytes {
     if bytes.len() == 5 {
@@ -242,7 +198,7 @@ fn process(
                     client_context,
                 ).respond_to();
             } else {
-                eprintln!("request_type => {:?}\narguments => {:?}\npeer: {:?}",
+                eprintln!("request_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
                     message.request_type,
                     message.args,
                     peer_addr);
@@ -262,8 +218,8 @@ fn process(
 /// Handle library clients
 struct LibraryClientHandler;
 impl LibraryClientHandler {
-    fn spawn(address: &SocketAddr, context: SharedClientContext) -> Result<(), io::Error> {
-        let listener = TcpListener::bind(address)?;
+    fn spawn(address: SocketAddr, state: LockedSharedState) -> Result<(), io::Error> {
+        let listener = TcpListener::bind(&address)?;
         let done = listener
             .incoming()
             .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
@@ -271,7 +227,7 @@ impl LibraryClientHandler {
                 let peer_addr = socket.peer_addr().unwrap();
                 let framed = BytesCodec::new().framed(socket);
                 let (writer, reader) = framed.split();
-                let context = context.clone();
+                let context = ClientState::new(state.clone());
 
                 let responses = reader.map(move |bytes| {
                     process(bytes, &context, &peer_addr)
@@ -292,7 +248,7 @@ impl LibraryClientHandler {
 
 pub struct DBLibraryServer;
 impl DBLibraryServer {
-    fn spawn(address: &str, client_context: LockedClientState) {
+    fn spawn(address: &str, state: LockedSharedState) {
         let addr = address.parse::<SocketAddr>().unwrap();
         let listener = TcpListener::bind(&addr).unwrap();
         let done = listener
@@ -300,12 +256,12 @@ impl DBLibraryServer {
             .map_err(|e| println!("failed to accept socket; error = {:?}", e))
             .for_each(move |socket| {
                 let port = rand::thread_rng().gen_range(60315, 65315);
-                let client_context = client_context.clone();
+                let state = state.clone();
                 let allocated_port = port.to_u8_vec();
 
                 let processor = read_exact(socket, vec![0; 19])
                     .and_then(move |(socket, _bytes)| {
-                        allocate_library_client_handler(port, client_context)
+                        allocate_library_client_handler(port, state)
                             .then(|_| Ok((socket, allocated_port)))
                     })
                     .and_then(|(socket, allocated_port)| {
@@ -317,8 +273,8 @@ impl DBLibraryServer {
         tokio::run(done);
     }
 
-    pub fn run(shared_state: LockedClientState) {
-        Self::spawn("0.0.0.0:12523", shared_state.clone());
+    pub fn run(state: LockedSharedState) {
+        Self::spawn("0.0.0.0:12523", state.clone());
     }
 }
 
@@ -332,16 +288,19 @@ impl U16ToVec for u16 {
     }
 }
 
-fn allocate_library_client_handler(port: u16, client_context: SharedClientContext) -> InitializeClientLibraryHandler {
+fn allocate_library_client_handler(
+    port: u16,
+    state: LockedSharedState,
+) -> InitializeClientLibraryHandler {
     InitializeClientLibraryHandler {
         port: port,
-        client_context: client_context
+        state: state,
     }
 }
 
 struct InitializeClientLibraryHandler {
     port: u16,
-    client_context: SharedClientContext,
+    state: LockedSharedState,
 }
 
 impl Future for InitializeClientLibraryHandler {
@@ -350,13 +309,11 @@ impl Future for InitializeClientLibraryHandler {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let port = self.port.to_owned();
-        let client_context = self.client_context.clone();
+        let state = self.state.clone();
 
         thread::spawn(move || {
-            LibraryClientHandler::spawn(
-                &SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port),
-                client_context,
-            );
+            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port);
+            LibraryClientHandler::spawn(addr, state).unwrap();
         });
 
         Ok(Async::Ready(()))
@@ -365,33 +322,19 @@ impl Future for InitializeClientLibraryHandler {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-    use bytes::Bytes;
-
+    use super::*;
     use super::super::packets::fixtures;
-    use super::{
-        RequestHandler,
-        RequestWrapper,
-        SharedClientContext,
-        ClientContext,
-    };
-    use super::{
-        Controller,
-        SetupController,
-        RootMenuController,
-    };
-    use super::super::state::ClientState;
 
     pub struct TestController;
     impl Controller for TestController {
-        fn to_response(&self, request: RequestWrapper, context: &SharedClientContext) -> Bytes {
+        fn to_response(&self, _request: RequestWrapper, _context: &ClientState) -> Bytes {
             Bytes::from("my-very-test-value")
         }
     }
 
     #[test]
     fn test_controller_trait() {
-        let context = ClientState::new();
+        let context = ClientState::new(SharedState::new());
         let request_handler = RequestHandler::new(
             Box::new(TestController {}),
             fixtures::setup_request_packet().unwrap().1,
@@ -403,7 +346,7 @@ mod test {
 
     #[test]
     fn test_setup_request_handling() {
-        let context = ClientState::new();
+        let context = ClientState::new(SharedState::new());
         let request_handler = RequestHandler::new(
             Box::new(SetupController {}),
             fixtures::setup_request_packet().unwrap().1,
@@ -415,7 +358,7 @@ mod test {
 
     #[test]
     fn test_root_menu_request_handling() {
-        let context = ClientState::new();
+        let context = ClientState::new(SharedState::new());
         let request_handler = RequestHandler::new(
             Box::new(RootMenuController {}),
             fixtures::root_menu_request().unwrap().1,
@@ -429,10 +372,6 @@ mod test {
 // TODO: code below will be removed
 struct Library;
 impl Library {
-    pub fn start_page() -> Vec<u8> {
-        vec![0xff, 0x20]
-    }
-
     fn close_list_item() -> Vec<u8> {
         vec![
             0x11,0x00,0x00,0x00,0x00,

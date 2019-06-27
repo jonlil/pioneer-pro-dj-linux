@@ -52,10 +52,6 @@ fn match_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<Pio
 
 #[cfg(test)]
 mod tests {
-    extern crate pnet;
-    extern crate ipnetwork;
-
-    use pnet::datalink::{NetworkInterface, MacAddr};
     use std::net::{
         IpAddr,
         Ipv4Addr,
@@ -66,12 +62,7 @@ mod tests {
         Ipv4Network,
         Ipv6Network,
     };
-
-
-    use crate::utils::network::{
-        match_interface,
-        PioneerNetwork,
-    };
+    use super::*;
 
     fn interfaces() -> Vec<NetworkInterface> {
         vec![
