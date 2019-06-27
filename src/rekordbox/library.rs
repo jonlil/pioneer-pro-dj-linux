@@ -18,7 +18,13 @@ use bytes::{Bytes, BytesMut};
 use super::state::{LockedClientState};
 
 use crate::rpc::server::convert_u16_to_two_u8s_be;
-use super::packets::{DBMessage, DBRequestType, DBField, DBFieldType, WrappedDBMessage};
+use super::packets::{
+    DBMessage,
+    DBRequestType,
+    DBField,
+    DBFieldType,
+    DBMessageResultType
+};
 use super::player::Player;
 
 struct PlayerState {
@@ -109,7 +115,7 @@ impl <'a>RequestHandler<'a> {
 }
 
 fn ok_request() -> Bytes {
-    DBField::new(DBFieldType::U16, &[0x40, 0x00]).as_bytes()
+    Bytes::from(DBField::new(DBFieldType::U16, &[0x40, 0x00]))
 }
 
 struct SetupController;
@@ -124,8 +130,8 @@ impl Controller for SetupController {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]);
 
-        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x00]).as_bytes());
-        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x11]).as_bytes());
+        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x00, 0x00])));
+        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x00, 0x11])));
 
         Bytes::from(bytes)
     }
@@ -143,8 +149,8 @@ impl Controller for RootMenuController {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]);
 
-        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x10, 0x00]).as_bytes());
-        bytes.extend(DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x00, 0x08]).as_bytes());
+        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x10, 0x00])));
+        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x00, 0x08])));
 
         Bytes::from(bytes)
     }

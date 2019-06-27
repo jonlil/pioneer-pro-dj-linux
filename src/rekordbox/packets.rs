@@ -57,6 +57,18 @@ impl<'a> DBField<'a> {
         }
     }
 
+    pub fn u32(value: &'a [u8]) -> Self {
+        DBField::new(DBFieldType::U32, value)
+    }
+
+    pub fn u16(value: &'a [u8]) -> Self {
+        DBField::new(DBFieldType::U16, value)
+    }
+
+    pub fn u8(value: &'a [u8]) -> Self {
+        DBField::new(DBFieldType::U8, value)
+    }
+
     pub fn as_bytes(&self) -> Bytes {
         let mut bytes = Bytes::from(vec![]);
 
@@ -67,6 +79,11 @@ impl<'a> DBField<'a> {
     }
 }
 
+impl<'a> From<DBField<'a>> for Bytes {
+    fn from(field: DBField) -> Self {
+        field.as_bytes()
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub struct DBMessage<'a> {
@@ -79,8 +96,7 @@ pub struct DBMessage<'a> {
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
-type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
-pub type WrappedDBMessage<'a> = IResult<&'a [u8], DBMessage<'a>>;
+pub type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
 
 impl<'a> DBMessage<'a> {
     const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
