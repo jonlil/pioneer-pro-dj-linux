@@ -3,22 +3,16 @@ extern crate bytes;
 extern crate futures;
 extern crate rand;
 
+use bytes::{Bytes, BytesMut};
 use futures::{Future, Async, Poll};
 use std::net::{SocketAddr, Ipv4Addr, IpAddr};
 use std::io::{Read, Write, self};
 use std::thread;
-use std::sync::{Arc, Mutex, MutexGuard};
 use rand::Rng;
-
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{read_exact, write_all};
 use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
-use bytes::{Bytes, BytesMut};
-use super::state::{
-    LockedClientState as LockedSharedState,
-    ClientState as SharedState
-};
 
 use crate::rpc::server::convert_u16_to_two_u8s_be;
 use super::packets::{
@@ -26,6 +20,10 @@ use super::packets::{
     DBRequestType,
     DBField,
     DBFieldType,
+};
+use super::state::{
+    LockedClientState as LockedSharedState,
+    ClientState as SharedState
 };
 
 struct ClientState {
@@ -99,14 +97,14 @@ impl <'a>RequestWrapper<'a> {
 struct RequestHandler<'a> {
     request: RequestWrapper<'a>,
     controller: Box<Controller>,
-    context: &'a ClientState,
+    context: &'a mut ClientState,
 }
 
 impl <'a>RequestHandler<'a> {
     pub fn new(
         request_handler: Box<Controller>,
         message: DBMessage<'a>,
-        context: &'a ClientState
+        context: &'a mut ClientState
     ) -> RequestHandler<'a> {
         RequestHandler {
             request: RequestWrapper::new(message),
@@ -165,7 +163,16 @@ impl Controller for RootMenuController {
 struct ArtistController;
 impl Controller for ArtistController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
-        let mut bytes: BytesMut = request.to_response();
+        let bytes: BytesMut = request.to_response();
+
+        Bytes::from(bytes)
+    }
+}
+
+struct RenderController;
+impl Controller for RenderController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let bytes: BytesMut = request.to_response();
 
         Bytes::from(bytes)
     }
@@ -173,8 +180,9 @@ impl Controller for ArtistController {
 
 fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
     match request_type {
-        DBRequestType::RootMenuRequest => Some(Box::new(RootMenuController)),
         DBRequestType::ArtistRequest => Some(Box::new(ArtistController)),
+        DBRequestType::RenderRequest => Some(Box::new(RenderController)),
+        DBRequestType::RootMenuRequest => Some(Box::new(RootMenuController)),
         DBRequestType::Setup => Some(Box::new(SetupController)),
         _ => None,
     }
@@ -182,7 +190,7 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
 
 fn process(
     bytes: BytesMut,
-    client_context: &ClientState,
+    context: &mut ClientState,
     peer_addr: &SocketAddr,
 ) -> Bytes {
     if bytes.len() == 5 {
@@ -192,13 +200,19 @@ fn process(
     match DBMessage::parse(&bytes) {
         Ok((_unprocessed_bytes, message)) => {
             if let Some(request_handler) = get_controller(&message.request_type) {
-                return RequestHandler::new(
+                let request_type = &message.request_type.clone();
+                let bytes = RequestHandler::new(
                     request_handler,
                     message,
-                    client_context,
+                    context,
                 ).respond_to();
+
+                context.previous_request = Some(*request_type);
+
+                return bytes;
             } else {
-                eprintln!("request_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
+                eprintln!("previous_request: {:?}\nrequest_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
+                    context.previous_request,
                     message.request_type,
                     message.args,
                     peer_addr);
@@ -227,10 +241,10 @@ impl LibraryClientHandler {
                 let peer_addr = socket.peer_addr().unwrap();
                 let framed = BytesCodec::new().framed(socket);
                 let (writer, reader) = framed.split();
-                let context = ClientState::new(state.clone());
+                let mut context = ClientState::new(state.clone());
 
                 let responses = reader.map(move |bytes| {
-                    process(bytes, &context, &peer_addr)
+                    process(bytes, &mut context, &peer_addr)
                 });
 
                 let writes = responses.fold(writer, |writer, response| {
@@ -334,11 +348,11 @@ mod test {
 
     #[test]
     fn test_controller_trait() {
-        let context = ClientState::new(SharedState::new());
+        let mut context = ClientState::new(SharedState::new());
         let request_handler = RequestHandler::new(
             Box::new(TestController {}),
             fixtures::setup_request_packet().unwrap().1,
-            &context,
+            &mut context,
         );
 
         assert_eq!(request_handler.respond_to(), Bytes::from("my-very-test-value"));
@@ -346,11 +360,11 @@ mod test {
 
     #[test]
     fn test_setup_request_handling() {
-        let context = ClientState::new(SharedState::new());
+        let mut context = ClientState::new(SharedState::new());
         let request_handler = RequestHandler::new(
             Box::new(SetupController {}),
             fixtures::setup_request_packet().unwrap().1,
-            &context,
+            &mut context,
         );
 
         assert_eq!(request_handler.respond_to(), fixtures::setup_response_packet());
@@ -358,11 +372,11 @@ mod test {
 
     #[test]
     fn test_root_menu_request_handling() {
-        let context = ClientState::new(SharedState::new());
+        let mut context = ClientState::new(SharedState::new());
         let request_handler = RequestHandler::new(
             Box::new(RootMenuController {}),
             fixtures::root_menu_request().unwrap().1,
-            &context,
+            &mut context,
         );
 
         assert_eq!(request_handler.respond_to(), fixtures::root_menu_response_packet());
