@@ -142,7 +142,7 @@ impl Index<usize> for PlayerCollection {
 
 #[cfg(test)]
 mod tests {
-    use crate::rekordbox::player::{PlayerCollection, Player};
+    use super::*;
     use std::net::{Ipv4Addr, IpAddr};
 
     #[test]

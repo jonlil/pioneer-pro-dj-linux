@@ -2,6 +2,7 @@ use nom::multi::count;
 use nom::bytes::complete::{tag, take};
 use nom::number::complete::{be_u32, be_u16, be_u8};
 use nom::IResult;
+use bytes::{Bytes, BytesMut};
 
 #[derive(Debug, PartialEq)]
 enum Error {
@@ -9,39 +10,151 @@ enum Error {
 }
 
 #[derive(Debug, PartialEq)]
-enum DBFieldType {
-  U8 = 0x0f,
-  U16 = 0x10,
-  U32 = 0x11,
-  Binary = 0x14,
-  String = 0x26,
-  Unknown,
+pub enum DBFieldType {
+  U8,
+  U16,
+  U32,
+  Binary,
+  String,
+}
+
+impl DBFieldType {
+    pub fn name(value: u8) -> Result<DBFieldType, &'static str> {
+        Ok(match value {
+            0x0f => DBFieldType::U8,
+            0x10 => DBFieldType::U16,
+            0x11 => DBFieldType::U32,
+            0x14 => DBFieldType::Binary,
+            0x25 => DBFieldType::String,
+            _ => {
+                return Err("unmatched type.")
+            },
+        })
+    }
+
+    pub fn value(&self) -> u8 {
+        match *self {
+            DBFieldType::U8 => 0x0f,
+            DBFieldType::U16 => 0x10,
+            DBFieldType::U32 => 0x11,
+            DBFieldType::Binary => 0x14,
+            DBFieldType::String => 0x25,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct DBField {
+    kind: DBFieldType,
+    value: Bytes,
+}
+
+impl DBField {
+    pub fn new(kind: DBFieldType, value: &[u8]) -> Self {
+        Self {
+            kind,
+            value: Bytes::from(value),
+        }
+    }
+
+    pub fn u32(value: &[u8]) -> Self {
+        DBField::new(DBFieldType::U32, value)
+    }
+
+    pub fn u16(value: &[u8]) -> Self {
+        DBField::new(DBFieldType::U16, value)
+    }
+
+    pub fn u8(value: &[u8]) -> Self {
+        DBField::new(DBFieldType::U8, value)
+    }
+
+    pub fn string(value: &str) -> Self {
+        let mut bytes = BytesMut::new();
+        let encoded: std::str::EncodeUtf16 = value.encode_utf16();
+
+        let data: Bytes = encoded.
+            into_iter().
+            flat_map(|item| {
+                item.to_be_bytes().to_vec()
+            }).
+            collect();
+
+        bytes.extend(&(((value.len() as u32 + 4) * 2 - 1) / 2).to_be_bytes());
+        bytes.extend(&[0xff, 0xfa]);
+        bytes.extend(data);
+        bytes.extend(&[0xff, 0xfb, 0x00, 0x00]);
+
+        DBField {
+            kind: DBFieldType::String,
+            value: Bytes::from(bytes),
+        }
+    }
+
+    pub fn as_bytes(&self) -> Bytes {
+        let mut bytes = Bytes::from(vec![]);
+
+        bytes.extend(vec![self.kind.value()]);
+        bytes.extend(self.value.to_vec());
+
+        bytes
+    }
+}
+
+impl From<DBField> for Bytes {
+    fn from(field: DBField) -> Self {
+        field.as_bytes()
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct DBMessage<'a> {
-    transaction_id: u32,
-    request_type: DBRequestType,
-    argument_count: u8,
-    arg_types: &'a [u8],
-    args: Vec<&'a [u8]>,
+    pub transaction_id: DBField,
+    pub request_type: DBRequestType,
+    pub argument_count: u8,
+    pub arg_types: &'a [u8],
+    pub args: Vec<DBField>,
 }
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
-type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
+pub type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
 
 impl<'a> DBMessage<'a> {
-    fn magic(i: &[u8]) -> DBMessageResult {
-        let (i, _) = take(1u8)(i)?;
-        tag([0x87, 0x23, 0x49, 0xae])(i)
+    const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
+
+    fn new(
+        transaction_id: DBField,
+        request_type: DBRequestType,
+        argument_count: u8,
+        arg_types: &'a [u8],
+        args: Vec<DBField>
+    ) -> DBMessage<'a> {
+        DBMessage {
+            transaction_id,
+            request_type,
+            argument_count,
+            arg_types,
+            args,
+        }
     }
 
-    fn transaction_id(i: &[u8]) -> DBMessageU32 {
+    fn magic(i: &[u8]) -> DBMessageResult {
         let (i, _) = take(1u8)(i)?;
-        let (i, transaction) = be_u32(i)?;
+        tag(DBMessage::MAGIC)(i)
+    }
 
-        Ok((i, transaction))
+    fn transaction_id(input: &[u8]) -> IResult<&[u8], DBField> {
+        let (input, kind) = take(1u8)(input)?;
+        let (input, transaction) = take(4u8)(input)?;
+
+        Ok((
+            input,
+            DBField {
+                kind: DBFieldType::name(kind[0]).unwrap(),
+                value: Bytes::from(transaction),
+            },
+        ))
     }
 
     fn request_type(input: &[u8]) -> DBMessageResultType<DBRequestType> {
@@ -49,17 +162,22 @@ impl<'a> DBMessage<'a> {
 
         let request_type: DBMessageResultType<u16> = be_u16(input);
         match request_type {
-            Ok((input, 12288_u16)) => Ok((input, DBRequestType::RenderRequest)),
+            Ok((input, 0_u16))    => Ok((input, DBRequestType::Setup)),
             Ok((input, 4096_u16)) => Ok((input, DBRequestType::RootMenuRequest)),
             Ok((input, 4097_u16)) => Ok((input, DBRequestType::GenreRequest)),
             Ok((input, 4098_u16)) => Ok((input, DBRequestType::ArtistRequest)),
             Ok((input, 4099_u16)) => Ok((input, DBRequestType::AlbumRequest)),
-            Ok((input, 4357_u16)) => Ok((input, DBRequestType::PlaylistRequest)),
             Ok((input, 4100_u16)) => Ok((input, DBRequestType::TitleRequest)),
             Ok((input, 4114_u16)) => Ok((input, DBRequestType::HistoryRequest)),
-            Ok((input, 0_u16))    => Ok((input, DBRequestType::Setup)),
-            Ok((input, data))     => Ok((input, DBRequestType::Unknown(data))),
-            Err(err)              => Err(err),
+            Ok((input, 4116_u16)) => Ok((input, DBRequestType::KeyRequest)),
+            Ok((input, 4357_u16)) => Ok((input, DBRequestType::PlaylistRequest)),
+            Ok((input, 4864_u16)) => Ok((input, DBRequestType::SearchQueryRequest)),
+            Ok((input, 12288_u16)) => Ok((input, DBRequestType::RenderRequest)),
+            Ok((input, data))     => {
+                eprintln!("{:?}", input);
+                Ok((input, DBRequestType::Unknown(data)))
+            },
+            Err(err) => Err(err),
         }
     }
 
@@ -74,11 +192,18 @@ impl<'a> DBMessage<'a> {
     }
 
     pub fn parse(i: &[u8]) -> IResult<&[u8], DBMessage> {
-        fn parse_arguments(input: &[u8]) -> IResult<&[u8], &[u8]> {
+        fn parse_arguments(input: &[u8]) -> IResult<&[u8], DBField> {
             match be_u8(input) {
                 Err(err) => Err(err),
-                Ok((input, 0x11)) => take(4u8)(input),
-                Ok((input, _consumed)) => Ok((input, &[])),
+                Ok((input, 0x11)) => {
+                    match take(4u8)(input) {
+                        Ok((input, value)) => {
+                            Ok((input, DBField::u32(value)))
+                        },
+                        Err(err) => Err(err),
+                    }
+                },
+                Ok((_input, _consumed)) => Err(nom::Err::Error((&[], nom::error::ErrorKind::Tag))),
             }
         }
 
@@ -97,10 +222,20 @@ impl<'a> DBMessage<'a> {
             args: args,
         }))
     }
+
+    pub fn to_response(self) -> BytesMut {
+        let mut bytes = BytesMut::new();
+
+        bytes.extend(vec![0x11]);
+        bytes.extend(DBMessage::MAGIC.to_vec());
+        bytes.extend(self.transaction_id.as_bytes());
+
+        bytes
+    }
 }
 
-#[derive(Debug, PartialEq)]
-enum DBRequestType {
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum DBRequestType {
     Setup,
     RenderRequest,
     RootMenuRequest,
@@ -108,14 +243,119 @@ enum DBRequestType {
     ArtistRequest,
     AlbumRequest,
     TitleRequest,
+    KeyRequest,
     PlaylistRequest,
+    SearchQueryRequest,
     HistoryRequest,
     Unknown(u16),
 }
 
 #[cfg(test)]
+pub mod fixtures {
+    use super::{DBMessage};
+    use nom::IResult;
+    use bytes::Bytes;
+
+    type DBMessageParseResult<'a> = IResult<&'a [u8], DBMessage<'a>>;
+    type DBMessageParse<'a> = DBMessage<'a>;
+
+    pub fn setup_request_packet<'a>() -> DBMessageParseResult<'a> {
+        DBMessage::parse(&[
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0xff, 0xff,
+            0xff, 0xfe, 0x10, 0x00, 0x00, 0x0f, 0x01, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x06, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x00, 0x02,
+        ])
+    }
+
+    pub fn setup_response_packet() -> Bytes {
+        Bytes::from(vec![
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0xff, 0xff,
+            0xff, 0xfe, 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00,
+            0x00, 0x11,
+        ])
+    }
+
+    pub fn root_menu_request<'a>() -> DBMessageParseResult<'a> {
+        DBMessage::parse(&[
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+            0x00, 0x32, 0x10, 0x10, 0x00, 0x0f, 0x03, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x02, 0x01, 0x04, 0x01, 0x11, 0x00, 0x00,
+            0x00, 0x00, 0x11, 0x00, 0xff, 0xff, 0xff,
+        ])
+    }
+
+    pub fn root_menu_response_packet() -> Bytes {
+        Bytes::from(vec![
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+            0x00, 0x32, 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x10, 0x00, 0x11, 0x00, 0x00,
+            0x00, 0x08,
+        ])
+    }
+
+    pub fn artist_request_type<'a>() -> DBMessageParse<'a> {
+        let request = vec![
+            0x11, 0x87, 0x23, 0x49, 0xae,
+            0x11, 0x05, 0x80, 0x00, 0x1c,
+            0x10, 0x21, 0x02,
+            0x0f, 0x02, 0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x02, 0x08, 0x04, 0x01,
+            0x11, 0x00, 0x00, 0x00, 0x05,
+        ];
+
+        DBMessage::parse(&[
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+            0x00, 0x10, 0x10, 0x10, 0x02, 0x0f, 0x02, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x02, 0x02, 0x04, 0x01,
+            0x11, 0x00, 0x00, 0x00, 0x00
+        ]).unwrap().1
+    }
+
+    pub fn render_root_menu_request<'a>() -> Vec<u8> {
+        vec![
+            0x11, 0x87, 0x23, 0x49, 0xae,
+            0x11, 0x05, 0x80, 0x00, 0x0f,
+            0x10, 0x30, 0x00,
+            0x0f, 0x06, 0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x02, 0x01, 0x04, 0x01,
+            0x11, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x00, 0x07,
+            0x11, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x00, 0x08,
+            0x11, 0x00, 0x00, 0x00, 0x00,
+        ]
+    }
+
+    pub fn render_artist_request() -> Vec<u8> {
+        vec![
+            0x11, 0x87, 0x23, 0x49, 0xae,
+            0x11, 0x05, 0x80, 0x00, 0x11,
+            0x10, 0x30, 0x00,
+            0x0f, 0x06, 0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x02, 0x02, 0x04, 0x01,
+            0x11, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x00, 0x01,
+            0x11, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x00, 0x01,
+            0x11, 0x00, 0x00, 0x00, 0x00,
+        ]
+    }
+}
+
+#[cfg(test)]
 mod test {
-    use super::{DBMessage, DBFieldType, DBRequestType};
+    use super::*;
 
     #[test]
     fn extract_magic_from_db_message() {
@@ -128,16 +368,25 @@ mod test {
     #[test]
     fn parse_transaction_id() {
         assert_eq!(
-            Ok((&[0x20][..], 1_u32)),
-            DBMessage::transaction_id(&[DBFieldType::U32 as u8, 0x00, 0x00, 0x00, 0x01, 0x20]),
+            Ok((
+                &[0x20][..],
+                DBField::u32(&[0x00, 0x00, 0x00, 0x01]),
+            )),
+            DBMessage::transaction_id(&[DBFieldType::U32.value(), 0x00, 0x00, 0x00, 0x01, 0x20]),
         );
         assert_eq!(
-            Ok((&[0x20][..], 256_u32)),
-            DBMessage::transaction_id(&[DBFieldType::U32 as u8, 0x00, 0x00, 0x01, 0x00, 0x20]),
+            Ok((
+                &[0x20][..],
+                DBField::new(DBFieldType::U32, &[0x00, 0x00, 0x01, 0x00]),
+            )),
+            DBMessage::transaction_id(&[DBFieldType::U32.value(), 0x00, 0x00, 0x01, 0x00, 0x20]),
         );
         assert_eq!(
-            Ok((&[0x20][..], 92_274_738_u32)),
-            DBMessage::transaction_id(&[DBFieldType::U32 as u8, 0x05, 0x80, 0x00, 0x32, 0x20]),
+            Ok((
+                &[0x20, 0x21][..],
+                DBField::new(DBFieldType::U32, &[0x05, 0x80, 0x00, 0x32]),
+            )),
+            DBMessage::transaction_id(&[DBFieldType::U32.value(), 0x05, 0x80, 0x00, 0x32, 0x20, 0x21]),
         );
     }
 
@@ -159,6 +408,11 @@ mod test {
             Ok((&[][..], DBRequestType::Unknown(255_u16))),
             DBMessage::request_type(&[DBFieldType::U16 as u8, 0x00, 0xff]),
         );
+
+        assert_eq!(
+            DBRequestType::ArtistRequest,
+            fixtures::artist_request_type().request_type,
+        )
     }
 
     #[test]
@@ -170,19 +424,24 @@ mod test {
     }
 
     #[test]
-    fn parse_dbmessage() {
-        let message = [
-            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
-            0x00, 0x32, 0x10, 0x10, 0x00, 0x0f, 0x03, 0x14,
-            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x11, 0x02, 0x01, 0x04, 0x01, 0x11, 0x00, 0x00,
-            0x00, 0x00, 0x11, 0x00, 0xff, 0xff, 0xff,
-        ];
+    fn dbmessage_setup_request_and_response() {
+        let dbmessage = fixtures::setup_request_packet().unwrap().1;
+        assert_eq!(DBRequestType::Setup, dbmessage.request_type);
+    }
 
+    #[test]
+    fn parse_test_library_handler() {
+        assert_eq!(
+            Err(nom::Err::Error((&[0, 0, 0, 1][..], nom::error::ErrorKind::Tag))),
+            DBMessage::parse(b"\x11\x00\x00\x00\x01"),
+        );
+    }
+
+    #[test]
+    fn parse_dbmessage() {
         assert_eq!(
             Ok((&[][..], DBMessage {
-                transaction_id: 92274738_u32,
+                transaction_id: DBField::u32(&[0x05, 0x80, 0x00, 0x32]),
                 request_type: DBRequestType::RootMenuRequest,
                 argument_count: 3_u8,
                 arg_types: &[
@@ -190,12 +449,12 @@ mod test {
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 ],
                 args: vec![
-                    &[0x02, 0x01, 0x04, 0x01],
-                    &[0x00, 0x00, 0x00, 0x00],
-                    &[0x00, 0xff, 0xff, 0xff],
+                    DBField::u32(&[0x02, 0x01, 0x04, 0x01]),
+                    DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
+                    DBField::u32(&[0x00, 0xff, 0xff, 0xff]),
                 ],
             })),
-            DBMessage::parse(&message),
+            fixtures::root_menu_request(),
         );
     }
 
@@ -218,6 +477,40 @@ mod test {
     }
 
     #[test]
-    fn parse_db_field_type() {
+    fn encode_db_field_to_bytes() {
+        assert_eq!(b"\x0f\x32", &DBField::u8(&[0x32]).as_bytes()[..]);
+        assert_eq!(b"\x10\x12\x13", &DBField::u16(&[0x12, 0x13]).as_bytes()[..]);
+        assert_eq!(
+            b"\x11\x00\x00\x00\x01",
+            &DBField::u32(&[0x00, 0x00, 0x00, 0x01]).as_bytes()[..],
+        );
+    }
+
+    #[test]
+    fn build_root_menu_render_request_package() {}
+
+    #[test]
+    fn string_argument_types() {
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x09, 0xff, 0xfa, 0x00, 0x41,
+            0x00, 0x52, 0x00, 0x54, 0x00, 0x49, 0x00, 0x53,
+            0x00, 0x54, 0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("ARTIST"));
+
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x0a, 0xff, 0xfa, 0x00, 0x48, 0x00, 0x49, 0x00, 0x53,
+            0x00, 0x54, 0x00, 0x4f, 0x00, 0x52, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("HISTORY"));
+
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x08, 0xff, 0xfa, 0x00, 0x54,
+            0x00, 0x52, 0x00, 0x41, 0x00, 0x43, 0x00, 0x4b,
+            0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("TRACK"));
+
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x06, 0xff, 0xfa, 0x00, 0x4b,
+            0x00, 0x45, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("KEY"));
     }
 }

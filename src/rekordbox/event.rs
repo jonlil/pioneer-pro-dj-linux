@@ -73,17 +73,12 @@ impl EventParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::rekordbox::event::{
-        Event,
-        EventParser
-    };
+    use super::*;
     use crate::rekordbox::{
         player::Player,
         SOFTWARE_IDENTIFICATION,
         APPLICATION_NAME,
     };
-    use std::str;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     const MOCKED_PLAYER_NAME: [u8; 20] = [
         0x58,0x44,0x4a,0x2d,0x37,0x30,
