@@ -9,7 +9,7 @@ enum Error {
     ParseError,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum DBFieldType {
   U8,
   U16,
@@ -25,7 +25,7 @@ impl DBFieldType {
             0x10 => DBFieldType::U16,
             0x11 => DBFieldType::U32,
             0x14 => DBFieldType::Binary,
-            0x25 => DBFieldType::String,
+            0x26 => DBFieldType::String,
             _ => {
                 return Err("unmatched type.")
             },
@@ -38,12 +38,12 @@ impl DBFieldType {
             DBFieldType::U16 => 0x10,
             DBFieldType::U32 => 0x11,
             DBFieldType::Binary => 0x14,
-            DBFieldType::String => 0x25,
+            DBFieldType::String => 0x26,
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DBField {
     kind: DBFieldType,
     value: Bytes,
@@ -69,21 +69,36 @@ impl DBField {
         DBField::new(DBFieldType::U8, value)
     }
 
-    pub fn string(value: &str) -> Self {
+    pub fn binary(value: &[u8]) -> Self {
+        DBField::new(DBFieldType::Binary, value)
+    }
+
+    pub fn string(value: &str, wrapped: bool) -> Self {
         let mut bytes = BytesMut::new();
         let encoded: std::str::EncodeUtf16 = value.encode_utf16();
+        let extra_bytes = if wrapped { 4 } else { 0 };
 
-        let data: Bytes = encoded.
-            into_iter().
-            flat_map(|item| {
-                item.to_be_bytes().to_vec()
-            }).
-            collect();
+        if value.len() > 0 {
+            let data: Bytes = encoded
+                .into_iter()
+                .flat_map(|item| { item.to_be_bytes().to_vec() })
+                .collect();
 
-        bytes.extend(&(((value.len() as u32 + 4) * 2 - 1) / 2).to_be_bytes());
-        bytes.extend(&[0xff, 0xfa]);
-        bytes.extend(data);
-        bytes.extend(&[0xff, 0xfb, 0x00, 0x00]);
+            bytes.extend(&
+                (((value.len() as u32 * 2) + extra_bytes)/2+1).to_be_bytes());
+            if wrapped {
+                bytes.extend(&[0xff, 0xfa]);
+                bytes.extend(data);
+                bytes.extend(&[0xff, 0xfb]);
+            } else {
+                bytes.extend(data);
+            }
+        } else {
+            bytes.extend(&[0x00, 0x00, 0x00, 0x01]);
+        }
+
+        // Append padding
+        bytes.extend(&[0x00, 0x00]);
 
         DBField {
             kind: DBFieldType::String,
@@ -123,7 +138,7 @@ pub type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
 impl<'a> DBMessage<'a> {
     const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
 
-    fn new(
+    pub fn new(
         transaction_id: DBField,
         request_type: DBRequestType,
         argument_count: u8,
@@ -173,6 +188,10 @@ impl<'a> DBMessage<'a> {
             Ok((input, 4357_u16)) => Ok((input, DBRequestType::PlaylistRequest)),
             Ok((input, 4864_u16)) => Ok((input, DBRequestType::SearchQueryRequest)),
             Ok((input, 12288_u16)) => Ok((input, DBRequestType::RenderRequest)),
+            Ok((input, 16385_u16)) => Ok((input, DBRequestType::MenuHeader)),
+            Ok((input, 16641_u16)) => Ok((input, DBRequestType::MenuItem)),
+            Ok((input, 16897_u16)) => Ok((input, DBRequestType::MenuFooter)),
+
             Ok((input, data))     => {
                 eprintln!("{:?}", input);
                 Ok((input, DBRequestType::Unknown(data)))
@@ -223,7 +242,7 @@ impl<'a> DBMessage<'a> {
         }))
     }
 
-    pub fn to_response(self) -> BytesMut {
+    pub fn to_response(&self) -> BytesMut {
         let mut bytes = BytesMut::new();
 
         bytes.extend(vec![0x11]);
@@ -234,20 +253,52 @@ impl<'a> DBMessage<'a> {
     }
 }
 
+impl<'a> From<DBMessage<'a>> for Bytes {
+    fn from(message: DBMessage) -> Bytes {
+        let mut buffer: BytesMut = message.to_response();
+
+        buffer.extend(vec![0x10]);
+        buffer.extend(&message.request_type.value());
+        buffer.extend(vec![0x0f, message.argument_count]);
+        buffer.extend(Bytes::from(DBField::binary(message.arg_types)));
+
+        for arg in message.args {
+            buffer.extend(arg.as_bytes());
+        }
+
+        Bytes::from(buffer)
+    }
+}
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum DBRequestType {
-    Setup,
+    AlbumRequest,
+    ArtistRequest,
+    GenreRequest,
+    HistoryRequest,
+    KeyRequest,
+    MenuFooter,
+    MenuHeader,
+    MenuItem,
+    PlaylistRequest,
     RenderRequest,
     RootMenuRequest,
-    GenreRequest,
-    ArtistRequest,
-    AlbumRequest,
-    TitleRequest,
-    KeyRequest,
-    PlaylistRequest,
     SearchQueryRequest,
-    HistoryRequest,
+    Setup,
+    TitleRequest,
     Unknown(u16),
+}
+
+impl DBRequestType {
+    fn value(&self) -> Bytes {
+        Bytes::from(match self {
+            DBRequestType::Setup => vec![0x00, 0x00],
+            DBRequestType::MenuHeader => vec![0x40, 0x01],
+            DBRequestType::MenuFooter => vec![0x42, 0x01],
+            DBRequestType::MenuItem => vec![0x41, 0x01],
+            _ => vec![0x00, 0x00],
+        })
+    }
 }
 
 #[cfg(test)]
@@ -337,8 +388,8 @@ pub mod fixtures {
         ]
     }
 
-    pub fn render_artist_request() -> Vec<u8> {
-        vec![
+    pub fn artist_request() -> Bytes {
+        Bytes::from(vec![
             0x11, 0x87, 0x23, 0x49, 0xae,
             0x11, 0x05, 0x80, 0x00, 0x11,
             0x10, 0x30, 0x00,
@@ -349,7 +400,28 @@ pub mod fixtures {
             0x11, 0x00, 0x00, 0x00, 0x00,
             0x11, 0x00, 0x00, 0x00, 0x01,
             0x11, 0x00, 0x00, 0x00, 0x00,
+        ])
+    }
+
+    pub fn render_artist_request() -> Vec<u8> {
+        vec![
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+            0x00, 0x41, 0x10, 0x30, 0x00, 0x0f, 0x06, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x06,
+            0x06, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x02, 0x02, 0x04, 0x01, 0x11, 0x00, 0x00,
+            0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x01, 0x11,
+            0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00,
+            0x01, 0x11, 0x00, 0x00, 0x00, 0x00,
         ]
+    }
+
+    pub fn raw_menu_footer_request() -> Bytes {
+        Bytes::from(vec![
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80, 0x00, 0x0f, 0x10, 0x42, 0x01, 0x0f,
+            0x00, 0x14, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ])
     }
 }
 
@@ -489,28 +561,85 @@ mod test {
     #[test]
     fn build_root_menu_render_request_package() {}
 
-    #[test]
-    fn string_argument_types() {
-        assert_eq!(DBField::new(DBFieldType::String, &[
-            0x00, 0x00, 0x00, 0x09, 0xff, 0xfa, 0x00, 0x41,
-            0x00, 0x52, 0x00, 0x54, 0x00, 0x49, 0x00, 0x53,
-            0x00, 0x54, 0xff, 0xfb, 0x00, 0x00,
-        ]), DBField::string("ARTIST"));
+    #[cfg(test)]
+    mod db_message_parsing {
+        use super::*;
 
-        assert_eq!(DBField::new(DBFieldType::String, &[
-            0x00, 0x00, 0x00, 0x0a, 0xff, 0xfa, 0x00, 0x48, 0x00, 0x49, 0x00, 0x53,
-            0x00, 0x54, 0x00, 0x4f, 0x00, 0x52, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
-        ]), DBField::string("HISTORY"));
+        #[test]
+        fn construct_menu_footer() {
+            assert_eq!(
+                DBMessage::parse(&fixtures::raw_menu_footer_request()).unwrap().1,
+                DBMessage::new(
+                    DBField::u32(&[0x05, 0x80, 0x00, 0x0f]),
+                    DBRequestType::MenuFooter,
+                    0x00,
+                    &[0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+                    vec![],
+                ),
+            );
+        }
 
-        assert_eq!(DBField::new(DBFieldType::String, &[
-            0x00, 0x00, 0x00, 0x08, 0xff, 0xfa, 0x00, 0x54,
-            0x00, 0x52, 0x00, 0x41, 0x00, 0x43, 0x00, 0x4b,
-            0xff, 0xfb, 0x00, 0x00,
-        ]), DBField::string("TRACK"));
+        #[test]
+        fn menu_footer_to_bytes() {
+            assert_eq!(
+                fixtures::raw_menu_footer_request(),
+                Bytes::from(DBMessage::parse(&fixtures::raw_menu_footer_request()).unwrap().1),
+            );
+        }
+    }
 
-        assert_eq!(DBField::new(DBFieldType::String, &[
-            0x00, 0x00, 0x00, 0x06, 0xff, 0xfa, 0x00, 0x4b,
-            0x00, 0x45, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
-        ]), DBField::string("KEY"));
+    #[cfg(test)]
+    mod argument_types {
+        use super::*;
+
+        #[test]
+        fn string_artist_argument() {
+            assert_eq!(DBField::new(DBFieldType::String, &[
+                0x00, 0x00, 0x00, 0x09, 0xff, 0xfa, 0x00, 0x41,
+                0x00, 0x52, 0x00, 0x54, 0x00, 0x49, 0x00, 0x53,
+                0x00, 0x54, 0xff, 0xfb, 0x00, 0x00,
+            ]), DBField::string("ARTIST", true));
+        }
+
+        #[test]
+        fn string_history_argument() {
+            assert_eq!(DBField::new(DBFieldType::String, &[
+                0x00, 0x00, 0x00, 0x0a, 0xff, 0xfa, 0x00, 0x48, 0x00, 0x49, 0x00, 0x53,
+                0x00, 0x54, 0x00, 0x4f, 0x00, 0x52, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
+            ]), DBField::string("HISTORY", true));
+        }
+
+        #[test]
+        fn string_track_argument() {
+            assert_eq!(DBField::new(DBFieldType::String, &[
+                0x00, 0x00, 0x00, 0x08, 0xff, 0xfa, 0x00, 0x54,
+                0x00, 0x52, 0x00, 0x41, 0x00, 0x43, 0x00, 0x4b,
+                0xff, 0xfb, 0x00, 0x00,
+            ]), DBField::string("TRACK", true));
+        }
+
+        #[test]
+        fn string_key_argument() {
+            assert_eq!(DBField::new(DBFieldType::String, &[
+                0x00, 0x00, 0x00, 0x06, 0xff, 0xfa, 0x00, 0x4b,
+                0x00, 0x45, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
+            ]), DBField::string("KEY", true));
+        }
+
+        #[test]
+        fn empty_string_argument() {
+            assert_eq!(DBField::new(DBFieldType::String, &[
+                0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
+            ]), DBField::string("", false));
+        }
+
+        #[test]
+        fn unwrapped_string() {
+            assert_eq!(DBField::new(DBFieldType::String, &[
+                0x00, 0x00, 0x00, 0x0c, 0x00, 0x4c, 0x00, 0x6f, 0x00, 0x6f, 0x00, 0x70,
+                0x00, 0x6d, 0x00, 0x61, 0x00, 0x73, 0x00, 0x74, 0x00, 0x65, 0x00, 0x72,
+                0x00, 0x73, 0x00, 0x00,
+            ]), DBField::string("Loopmasters", false));
+        }
     }
 }
