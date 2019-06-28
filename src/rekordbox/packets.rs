@@ -44,29 +44,51 @@ impl DBFieldType {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct DBField<'a> {
+pub struct DBField {
     kind: DBFieldType,
-    value: &'a [u8],
+    value: Bytes,
 }
 
-impl<'a> DBField<'a> {
-    pub fn new(kind: DBFieldType, value: &'a [u8]) -> Self {
+impl DBField {
+    pub fn new(kind: DBFieldType, value: &[u8]) -> Self {
         Self {
             kind,
-            value,
+            value: Bytes::from(value),
         }
     }
 
-    pub fn u32(value: &'a [u8]) -> Self {
+    pub fn u32(value: &[u8]) -> Self {
         DBField::new(DBFieldType::U32, value)
     }
 
-    pub fn u16(value: &'a [u8]) -> Self {
+    pub fn u16(value: &[u8]) -> Self {
         DBField::new(DBFieldType::U16, value)
     }
 
-    pub fn u8(value: &'a [u8]) -> Self {
+    pub fn u8(value: &[u8]) -> Self {
         DBField::new(DBFieldType::U8, value)
+    }
+
+    pub fn string(value: &str) -> Self {
+        let mut bytes = BytesMut::new();
+        let encoded: std::str::EncodeUtf16 = value.encode_utf16();
+
+        let data: Bytes = encoded.
+            into_iter().
+            flat_map(|item| {
+                item.to_be_bytes().to_vec()
+            }).
+            collect();
+
+        bytes.extend(&(((value.len() as u32 + 4) * 2 - 1) / 2).to_be_bytes());
+        bytes.extend(&[0xff, 0xfa]);
+        bytes.extend(data);
+        bytes.extend(&[0xff, 0xfb, 0x00, 0x00]);
+
+        DBField {
+            kind: DBFieldType::String,
+            value: Bytes::from(bytes),
+        }
     }
 
     pub fn as_bytes(&self) -> Bytes {
@@ -79,7 +101,7 @@ impl<'a> DBField<'a> {
     }
 }
 
-impl<'a> From<DBField<'a>> for Bytes {
+impl From<DBField> for Bytes {
     fn from(field: DBField) -> Self {
         field.as_bytes()
     }
@@ -87,11 +109,11 @@ impl<'a> From<DBField<'a>> for Bytes {
 
 #[derive(Debug, PartialEq)]
 pub struct DBMessage<'a> {
-    pub transaction_id: DBField<'a>,
+    pub transaction_id: DBField,
     pub request_type: DBRequestType,
     pub argument_count: u8,
     pub arg_types: &'a [u8],
-    pub args: Vec<DBField<'a>>,
+    pub args: Vec<DBField>,
 }
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
@@ -102,11 +124,11 @@ impl<'a> DBMessage<'a> {
     const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
 
     fn new(
-        transaction_id: DBField<'a>,
+        transaction_id: DBField,
         request_type: DBRequestType,
         argument_count: u8,
         arg_types: &'a [u8],
-        args: Vec<DBField<'a>>
+        args: Vec<DBField>
     ) -> DBMessage<'a> {
         DBMessage {
             transaction_id,
@@ -130,7 +152,7 @@ impl<'a> DBMessage<'a> {
             input,
             DBField {
                 kind: DBFieldType::name(kind[0]).unwrap(),
-                value: transaction,
+                value: Bytes::from(transaction),
             },
         ))
     }
@@ -176,10 +198,7 @@ impl<'a> DBMessage<'a> {
                 Ok((input, 0x11)) => {
                     match take(4u8)(input) {
                         Ok((input, value)) => {
-                            Ok((input, DBField {
-                                kind: DBFieldType::U32,
-                                value: value,
-                            }))
+                            Ok((input, DBField::u32(value)))
                         },
                         Err(err) => Err(err),
                     }
@@ -351,10 +370,7 @@ mod test {
         assert_eq!(
             Ok((
                 &[0x20][..],
-                DBField {
-                    kind: DBFieldType::U32,
-                    value: &[0x00, 0x00, 0x00, 0x01],
-                },
+                DBField::u32(&[0x00, 0x00, 0x00, 0x01]),
             )),
             DBMessage::transaction_id(&[DBFieldType::U32.value(), 0x00, 0x00, 0x00, 0x01, 0x20]),
         );
@@ -425,10 +441,7 @@ mod test {
     fn parse_dbmessage() {
         assert_eq!(
             Ok((&[][..], DBMessage {
-                transaction_id: DBField {
-                    kind: DBFieldType::U32,
-                    value: &[0x05, 0x80, 0x00, 0x32],
-                },
+                transaction_id: DBField::u32(&[0x05, 0x80, 0x00, 0x32]),
                 request_type: DBRequestType::RootMenuRequest,
                 argument_count: 3_u8,
                 arg_types: &[
@@ -436,18 +449,9 @@ mod test {
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 ],
                 args: vec![
-                    DBField {
-                        kind: DBFieldType::U32,
-                        value: &[0x02, 0x01, 0x04, 0x01],
-                    },
-                    DBField {
-                        kind: DBFieldType::U32,
-                        value: &[0x00, 0x00, 0x00, 0x00],
-                    },
-                    DBField {
-                        kind: DBFieldType::U32,
-                        value: &[0x00, 0xff, 0xff, 0xff],
-                    },
+                    DBField::u32(&[0x02, 0x01, 0x04, 0x01]),
+                    DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
+                    DBField::u32(&[0x00, 0xff, 0xff, 0xff]),
                 ],
             })),
             fixtures::root_menu_request(),
@@ -474,17 +478,39 @@ mod test {
 
     #[test]
     fn encode_db_field_to_bytes() {
-        assert_eq!(
-            b"\x0f\x32",
-            &DBField { kind: DBFieldType::U8, value: &[0x32] }.as_bytes()[..],
-        );
-        assert_eq!(
-            b"\x10\x12\x13",
-            &DBField { kind: DBFieldType::U16, value: &[0x12, 0x13] }.as_bytes()[..],
-        );
+        assert_eq!(b"\x0f\x32", &DBField::u8(&[0x32]).as_bytes()[..]);
+        assert_eq!(b"\x10\x12\x13", &DBField::u16(&[0x12, 0x13]).as_bytes()[..]);
         assert_eq!(
             b"\x11\x00\x00\x00\x01",
-            &DBField { kind: DBFieldType::U32, value: &[0x00, 0x00, 0x00, 0x01] }.as_bytes()[..],
+            &DBField::u32(&[0x00, 0x00, 0x00, 0x01]).as_bytes()[..],
         );
+    }
+
+    #[test]
+    fn build_root_menu_render_request_package() {}
+
+    #[test]
+    fn string_argument_types() {
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x09, 0xff, 0xfa, 0x00, 0x41,
+            0x00, 0x52, 0x00, 0x54, 0x00, 0x49, 0x00, 0x53,
+            0x00, 0x54, 0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("ARTIST"));
+
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x0a, 0xff, 0xfa, 0x00, 0x48, 0x00, 0x49, 0x00, 0x53,
+            0x00, 0x54, 0x00, 0x4f, 0x00, 0x52, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("HISTORY"));
+
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x08, 0xff, 0xfa, 0x00, 0x54,
+            0x00, 0x52, 0x00, 0x41, 0x00, 0x43, 0x00, 0x4b,
+            0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("TRACK"));
+
+        assert_eq!(DBField::new(DBFieldType::String, &[
+            0x00, 0x00, 0x00, 0x06, 0xff, 0xfa, 0x00, 0x4b,
+            0x00, 0x45, 0x00, 0x59, 0xff, 0xfb, 0x00, 0x00,
+        ]), DBField::string("KEY"));
     }
 }
