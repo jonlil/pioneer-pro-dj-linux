@@ -15,15 +15,13 @@ use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
 
 use crate::rpc::server::convert_u16_to_two_u8s_be;
-use super::packets::{
-    DBMessage,
-    DBRequestType,
-    DBField,
-    DBFieldType,
-};
+use super::packets::DBMessage;
+use super::db_field::{DBField, DBFieldType};
+use super::db_request_type::DBRequestType;
+use super::db_message_argument::ArgumentCollection;
 use super::state::{
     LockedClientState as LockedSharedState,
-    ClientState as SharedState
+    ClientState as SharedState,
 };
 
 struct ClientState {
@@ -80,11 +78,11 @@ trait Controller {
     fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes;
 }
 
-struct RequestWrapper<'a> {
-    message: DBMessage<'a>,
+struct RequestWrapper {
+    message: DBMessage,
 }
 
-impl <'a>RequestWrapper<'a> {
+impl RequestWrapper {
     pub fn new(message: DBMessage) -> RequestWrapper {
         RequestWrapper { message: message }
     }
@@ -95,7 +93,7 @@ impl <'a>RequestWrapper<'a> {
 }
 
 struct RequestHandler<'a> {
-    request: RequestWrapper<'a>,
+    request: RequestWrapper,
     controller: Box<Controller>,
     context: &'a mut ClientState,
 }
@@ -103,7 +101,7 @@ struct RequestHandler<'a> {
 impl <'a>RequestHandler<'a> {
     pub fn new(
         request_handler: Box<Controller>,
-        message: DBMessage<'a>,
+        message: DBMessage,
         context: &'a mut ClientState
     ) -> RequestHandler<'a> {
         RequestHandler {
@@ -128,14 +126,10 @@ impl Controller for SetupController {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
-        bytes.extend(vec![
-            0x0f, 0x02,
-            0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ]);
-
-        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x00, 0x00])));
-        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x00, 0x11])));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+            DBField::from([0x00, 0x00, 0x00, 0x11]),
+        ])));
 
         Bytes::from(bytes)
     }
@@ -147,33 +141,40 @@ impl Controller for RootMenuController {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
-        bytes.extend(vec![
-            0x0f, 0x02,
-            0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ]);
-
-        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x10, 0x00])));
-        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x00, 0x08])));
+        bytes.extend(Bytes::from(
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, 0x10, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x08]),
+            ]),
+        ));
 
         Bytes::from(bytes)
     }
 }
 
-struct ArtistController;
-impl Controller for ArtistController {
+struct NavigationController;
+impl Controller for NavigationController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let request_type = request.message.request_type;
         let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
 
         bytes.extend(ok_request());
-        bytes.extend(vec![
-            0x0f, 0x02,
-            0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ]);
+        bytes.extend(Bytes::from(
+            ArgumentCollection::new(vec![
+                DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
+                DBField::from([0x00, 0x00, 0x00, 0x01]),
+            ]),
+        ));
 
-        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x10, 0x02])));
-        bytes.extend(Bytes::from(DBField::u32(&[0x00, 0x00, 0x00, 0x01])));
+        Bytes::from(bytes)
+    }
+}
+
+struct TitleController;
+impl Controller for TitleController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let mut bytes: BytesMut = request.to_response();
 
         Bytes::from(bytes)
     }
@@ -207,52 +208,46 @@ impl From<Response> for Bytes {
     }
 }
 
-fn build_message_header<'a>(transaction_id: &DBField) -> DBMessage<'a> {
+fn build_message_header(transaction_id: &DBField) -> DBMessage {
     DBMessage::new(
         transaction_id.clone(),
         DBRequestType::MenuHeader,
-        0x02,
-        &[0x00,0x00,0x00,0x0c,0x06,0x06,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00],
-        vec![
-            DBField::u32(&[0x00, 0x00, 0x00, 0x01]),
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-        ]
+        ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, 0x00, 0x01]),
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+        ]),
     )
 }
 
-fn build_message_item<'a>(transaction_id: &DBField, metadata: (DBField, u8, u8, u8)) -> DBMessage<'a> {
+fn build_message_item(transaction_id: &DBField, metadata: (DBField, u8, u8, u8, u8)) -> DBMessage {
     DBMessage::new(
         transaction_id.clone(),
         DBRequestType::MenuItem,
-        0x0c, // TODO: Construct with DBField::u8
-        &[0x00,0x00,0x00,0x0c,0x06,0x06,0x06,0x02,0x06,0x02,0x06,0x06,0x06,0x06,0x06,0x06],
-        vec![
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-            DBField::u32(&[0x00, 0x00, 0x00, metadata.2]),
-            DBField::u32(&[0x00, 0x00, 0x00, metadata.3]),
+        ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+            DBField::from([0x00, 0x00, 0x00, metadata.2]),
+            DBField::from([0x00, 0x00, 0x00, metadata.3]),
             metadata.0,
-            DBField::u32(&[0x00, 0x00, 0x00, 0x02]),
-            DBField::string("", false),
-            DBField::u32(&[0x00, 0x00, 0x00, metadata.1]),
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-        ]
+            DBField::from([0x00, 0x00, 0x00, 0x02]),
+            DBField::from(""),
+            DBField::from([0x00, 0x00, 0x00, metadata.1]),
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+            DBField::from([0x00, 0x00, metadata.4, 0x00]),
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+        ]),
     )
 }
 
-fn build_message_footer<'a>(transaction_id: &DBField) -> DBMessage<'a> {
+fn build_message_footer(transaction_id: &DBField) -> DBMessage {
     DBMessage::new(
         transaction_id.clone(),
         DBRequestType::MenuFooter,
-        0x02,
-        &[0x00,0x00,0x00,0x0c,0x06,0x06,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00],
-        vec![
-            DBField::u32(&[0x00, 0x00, 0x00, 0x01]),
-            DBField::u32(&[0x00, 0x00, 0x00, 0x00]),
-        ]
+        ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, 0x00, 0x01]),
+            DBField::from([0x00, 0x00, 0x00, 0x00]),
+        ]),
     )
 }
 
@@ -261,27 +256,25 @@ impl RenderController {
     fn render_root_menu(&self, request: RequestWrapper, mut response: Response, context: &ClientState) -> Response {
         let transaction_id = request.message.transaction_id.clone();
 
-        let menu_items: Vec<Bytes> = [
-            // MenuName, MetadataType, MenuId
-            ("ARTIST", 0x81, 0x02, 0x12),
-            ("ALBUM", 0x82, 0x03, 0x10),
-            ("TRACK", 0x83, 0x04, 0x10),
-            ("KEY", 0x8b, 0x0c, 0x0c),
-            ("PLAYLIST", 0x84, 0x05, 0x16),
-            ("HISTORY", 0x95, 0x16, 0x14),
-            ("SEARCH", 0x91, 0x12, 0x12),
-        ].to_vec().iter()
-            .map(|item| {
+        response.extend(Bytes::from(build_message_header(&transaction_id)));
+        response.extend_items(vec![
+                // MenuName, MetadataType, MenuId
+                ("\u{fffa}ARTIST\u{fffb}", 0x81, 0x02, 0x12),
+                ("\u{fffa}ALBUM\u{fffb}", 0x82, 0x03, 0x10),
+                ("\u{fffa}TRACK\u{fffb}", 0x83, 0x04, 0x10),
+                ("\u{fffa}KEY\u{fffb}", 0x8b, 0x0c, 0x0c),
+                ("\u{fffa}PLAYLIST\u{fffb}", 0x84, 0x05, 0x16),
+                ("\u{fffa}HISTORY\u{fffb}", 0x95, 0x16, 0x14),
+                ("\u{fffa}SEARCH\u{fffb}", 0x91, 0x12, 0x12),
+            ].iter().map(|item| {
                 Bytes::from(build_message_item(&transaction_id, (
-                    DBField::string(&item.0, true),
+                    DBField::from(item.0),
                     item.1,
                     item.2,
                     item.3,
+                    0x00,
                 )))
-            }).collect();
-
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend_items(menu_items);
+            }).collect());
         response.extend(Bytes::from(build_message_footer(&transaction_id)));
 
         response
@@ -293,18 +286,98 @@ impl RenderController {
         response.extend(Bytes::from(build_message_header(&transaction_id)));
         response.extend_items(vec![
             Bytes::from(build_message_item(&transaction_id, (
-                DBField::string("Loopmasters", false),
+                DBField::from("Loopmasters"),
                 0x07,
                 0x01,
-                0x18
+                0x18,
+                0x00,
             )))
         ]);
         response.extend(Bytes::from(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
-            0x00,
-            &[0x00,0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            vec![],
+            ArgumentCollection::new(vec![]),
+        )));
+
+        response
+    }
+
+    fn render_title_page(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+        let transaction_id = request.message.transaction_id;
+
+        response.extend(Bytes::from(build_message_header(&transaction_id)));
+        response.extend_items(vec![
+            Bytes::from(build_message_item(&transaction_id, (
+                DBField::from("Loopmasters"),
+                0x04,
+                0x05,
+                0x1a,
+                0x00
+            )))
+        ]);
+        response.extend(Bytes::from(DBMessage::new(
+            transaction_id,
+            DBRequestType::MenuFooter,
+            ArgumentCollection::new(vec![]),
+        )));
+
+        response
+    }
+
+    fn render_album_by_artist(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+        let transaction_id = request.message.transaction_id;
+
+        response.extend(Bytes::from(build_message_header(&transaction_id)));
+        response.extend_items(vec![
+            Bytes::from(build_message_item(&transaction_id, (
+                DBField::from("Unknown"),
+                0x02,
+                0x00,
+                0x10,
+                0x00,
+            )))
+        ]);
+        response.extend(Bytes::from(DBMessage::new(
+            transaction_id,
+            DBRequestType::MenuFooter,
+            ArgumentCollection::new(vec![]),
+        )));
+        response
+    }
+
+    fn render_title_by_artist_album(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+        let transaction_id = request.message.transaction_id;
+
+        response.extend(Bytes::from(build_message_header(&transaction_id)));
+        response.extend_items(vec![
+            ("Demo Track 1", 0x04, 0x05, 0x1a),
+            ("Demo Track 2", 0x04, 0x06, 0x1a),
+        ].iter().map(|item| {
+            Bytes::from(build_message_item(&transaction_id, (
+                DBField::from(item.0),
+                item.1,
+                item.2,
+                item.3,
+                0x01
+            )))
+        }).collect());
+
+        response.extend(Bytes::from(DBMessage::new(
+            transaction_id,
+            DBRequestType::MenuFooter,
+            ArgumentCollection::new(vec![]),
+        )));
+        response
+    }
+
+    fn render_metadata(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+        let transaction_id = request.message.transaction_id;
+
+        response.extend(Bytes::from(build_message_header(&transaction_id)));
+        response.extend(Bytes::from(DBMessage::new(
+            transaction_id,
+            DBRequestType::MenuFooter,
+            ArgumentCollection::new(vec![]),
         )));
 
         response
@@ -313,9 +386,15 @@ impl RenderController {
 
 impl Controller for RenderController {
     fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes {
+        let response = Response::new();
+
         Bytes::from(match context.previous_request {
-            Some(DBRequestType::RootMenuRequest) => self.render_root_menu(request, Response::new(), context),
-            Some(DBRequestType::ArtistRequest) => self.render_artist_page(request, Response::new(), context),
+            Some(DBRequestType::RootMenuRequest) => self.render_root_menu(request, response, context),
+            Some(DBRequestType::ArtistRequest) => self.render_artist_page(request, response, context),
+            Some(DBRequestType::TitleRequest) => self.render_title_page(request, response, context),
+            Some(DBRequestType::AlbumByArtistRequest) => self.render_album_by_artist(request, response, context),
+            Some(DBRequestType::TitleByArtistAlbumRequest) => self.render_title_by_artist_album(request, response, context),
+            Some(DBRequestType::MetadataRequest) => self.render_metadata(request, response, context),
             _ => Response { buffer: BytesMut::new() },
         })
     }
@@ -323,16 +402,20 @@ impl Controller for RenderController {
 
 fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
     match request_type {
-        DBRequestType::ArtistRequest => Some(Box::new(ArtistController)),
+        DBRequestType::ArtistRequest => Some(Box::new(NavigationController)),
         DBRequestType::RenderRequest => Some(Box::new(RenderController)),
         DBRequestType::RootMenuRequest => Some(Box::new(RootMenuController)),
+        DBRequestType::TitleRequest => Some(Box::new(TitleController)),
+        DBRequestType::AlbumByArtistRequest => Some(Box::new(NavigationController)),
+        DBRequestType::TitleByArtistAlbumRequest => Some(Box::new(NavigationController)),
+        DBRequestType::MetadataRequest => Some(Box::new(NavigationController)),
         DBRequestType::Setup => Some(Box::new(SetupController)),
         _ => None,
     }
 }
 
 fn process(
-    bytes: BytesMut,
+    bytes: Bytes,
     context: &mut ClientState,
     peer_addr: &SocketAddr,
 ) -> Bytes {
@@ -342,6 +425,12 @@ fn process(
 
     match DBMessage::parse(&bytes) {
         Ok((_unprocessed_bytes, message)) => {
+            eprintln!("previous_request: {:?}\nrequest_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
+                context.previous_request,
+                message.request_type,
+                message.arguments,
+                peer_addr);
+
             if let Some(request_handler) = get_controller(&message.request_type) {
                 let request_type = &message.request_type.clone();
                 let bytes = RequestHandler::new(
@@ -353,12 +442,6 @@ fn process(
                 context.previous_request = Some(*request_type);
 
                 return bytes;
-            } else {
-                eprintln!("previous_request: {:?}\nrequest_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
-                    context.previous_request,
-                    message.request_type,
-                    message.args,
-                    peer_addr);
             }
         },
         Err(nom::Err::Error((bytes, _))) => {
@@ -387,7 +470,7 @@ impl LibraryClientHandler {
                 let mut context = ClientState::new(state.clone());
 
                 let responses = reader.map(move |bytes| {
-                    process(bytes, &mut context, &peer_addr)
+                    process(Bytes::from(bytes), &mut context, &peer_addr)
                 });
 
                 let writes = responses.fold(writer, |writer, response| {
@@ -480,7 +563,8 @@ impl Future for InitializeClientLibraryHandler {
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::super::packets::fixtures;
+    use super::super::fixtures;
+    use pretty_assertions::{assert_eq};
 
     pub struct TestController;
     impl Controller for TestController {
@@ -527,48 +611,22 @@ mod test {
 
     #[test]
     fn test_artist_request_response() {
-        let response = Bytes::from(vec![
-            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
-            0x00, 0x11, 0x10, 0x40, 0x00, 0x0f, 0x02, 0x14,
-            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x11, 0x00, 0x00, 0x10, 0x02, 0x11, 0x00, 0x00,
-            0x00, 0x01,
-        ]);
-        let request = fixtures::artist_request();
-
+        let dialog = fixtures::artist_dialog();
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
         let mut context = ClientState::new(SharedState::new());
-        let request_handler = RequestHandler::new(
-            Box::new(ArtistController {}),
-            DBMessage::parse(&request).unwrap().1,
-            &mut context,
-        );
 
-        assert_eq!(response, request_handler.respond_to());
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::ArtistRequest), context.previous_request);
     }
-
 
     #[test]
     fn test_rendering_artist_request() {
-        let response = Bytes::from(vec![
-            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80, 0x00, 0x41, 0x10, 0x40, 0x01, 0x0f, 0x02, 0x14,
-            0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x11, 0x00, 0x00, 0x00, 0x01, 0x11, 0x00, 0x00, 0x00, 0x00, 0x11, 0x87, 0x23, 0x49, 0xae, 0x11,
-            0x05, 0x80, 0x00, 0x41, 0x10, 0x41, 0x01, 0x0f, 0x0c, 0x14, 0x00, 0x00, 0x00, 0x0c, 0x06, 0x06,
-            0x06, 0x02, 0x06, 0x02, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x11, 0x00, 0x00, 0x00, 0x00, 0x11,
-            0x00, 0x00, 0x00, 0x01, 0x11, 0x00, 0x00, 0x00, 0x18, 0x26, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x4c,
-            0x00, 0x6f, 0x00, 0x6f, 0x00, 0x70, 0x00, 0x6d, 0x00, 0x61, 0x00, 0x73, 0x00, 0x74, 0x00, 0x65,
-            0x00, 0x72, 0x00, 0x73, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x02, 0x26, 0x00, 0x00, 0x00, 0x01,
-            0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x07, 0x11, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00,
-            0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x00,
-            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80, 0x00, 0x41, 0x10, 0x42, 0x01, 0x0f, 0x00, 0x14,
-            0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-        ]);
+        let response = fixtures::render_artist_response();
+        let render_artist_request = fixtures::render_artist_request();
 
         let mut context = ClientState::new(SharedState::new());
         context.previous_request = Some(DBRequestType::ArtistRequest);
 
-        let render_artist_request = fixtures::render_artist_request();
         let request_handler = RequestHandler::new(
             Box::new(RenderController {}),
             DBMessage::parse(&render_artist_request).unwrap().1,
@@ -576,5 +634,41 @@ mod test {
         );
 
         assert_eq!(response, request_handler.respond_to());
+    }
+
+    #[test]
+    fn test_album_by_artist_dialog() {
+        let dialog = fixtures::album_by_artist_dialog();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::AlbumByArtistRequest), context.previous_request);
+
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
+    }
+
+    #[test]
+    fn test_title_by_artist_dialog() {
+        let dialog = fixtures::title_by_artist_album_dialog();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
+
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
+    }
+
+    // #[test]
+    fn test_metadata_dialog() {
+        let dialog = fixtures::metadata_dialog();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::MetadataRequest), context.previous_request);
+
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 }

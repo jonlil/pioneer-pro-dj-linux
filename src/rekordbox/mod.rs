@@ -21,3 +21,10 @@ mod rpc;
 mod library;
 mod packets;
 mod state;
+mod db_field;
+mod db_request_type;
+mod db_message_argument;
+
+// tests
+#[cfg(test)]
+mod fixtures;

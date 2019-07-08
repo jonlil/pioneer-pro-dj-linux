@@ -1,7 +1,7 @@
 extern crate rand;
 
 use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
 use std::io::ErrorKind;
