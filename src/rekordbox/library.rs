@@ -374,6 +374,206 @@ impl RenderController {
         let transaction_id = request.message.transaction_id;
 
         response.extend(Bytes::from(build_message_header(&transaction_id)));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x01]),
+                    DBField::from([0x00, 0x00, 0x00, 0x05]),
+                    DBField::from([0x00, 0x00, 0x00, 0x1a]),
+                    DBField::from("Demo Track 1"),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x04]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x01, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ]),
+            )
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x01]),
+                    DBField::from([0x00, 0x00, 0x00, 0x01]),
+                    DBField::from([0x00, 0x00, 0x00, 0x18]),
+                    DBField::from("Loopmasters"),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x07]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            )
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x01]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ]),
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0xac]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x0b]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x32, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x0d]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x05]),
+                    DBField::from([0x00, 0x00, 0x00, 0x3c]),
+                    DBField::from("Tracks by www.loopmasters.com"),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x23]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x01]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x0f]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x0a]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x13]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x06]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
         response.extend(Bytes::from(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
@@ -660,7 +860,7 @@ mod test {
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
-    // #[test]
+    #[test]
     fn test_metadata_dialog() {
         let dialog = fixtures::metadata_dialog();
         let mut context = ClientState::new(SharedState::new());
@@ -668,7 +868,6 @@ mod test {
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MetadataRequest), context.previous_request);
-
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 }
