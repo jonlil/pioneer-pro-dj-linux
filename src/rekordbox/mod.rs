@@ -24,6 +24,7 @@ mod state;
 mod db_field;
 mod db_request_type;
 mod db_message_argument;
+mod metadata_type;
 
 // tests
 #[cfg(test)]
