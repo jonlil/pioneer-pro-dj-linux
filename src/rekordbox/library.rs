@@ -159,12 +159,13 @@ impl Controller for NavigationController {
         let request_type = request.message.request_type;
         let mut bytes: BytesMut = request.to_response();
         let request_type_value = request_type.value();
+        let items_to_render: u32 = 1u32;
 
         bytes.extend(ok_request());
         bytes.extend(Bytes::from(
             ArgumentCollection::new(vec![
                 DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
-                DBField::from([0x00, 0x00, 0x00, 0x01]),
+                DBField::from(items_to_render),
             ]),
         ));
 
@@ -583,6 +584,161 @@ impl RenderController {
 
         response
     }
+
+    fn render_mount_info(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+        let transaction_id = request.message.transaction_id;
+
+        response.extend(Bytes::from(build_message_header(&transaction_id)));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x01]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from(metadata_type::TITLE),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x01, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0xac]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from(metadata_type::DURATION),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x32, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from(metadata_type::BPM),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x3c]),
+                    DBField::from("Tracks by www.loopmasters.com"),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from(metadata_type::COMMENT),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ]),
+            ),
+        ));
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x69, 0x47, 0xa8]),
+                    DBField::from([0x00, 0x00, 0x00, 0x05]),
+                    DBField::from([0x00, 0x00, 0x00, 0x7a]),
+                    DBField::from("C:/Users/Snaajf/Music/PioneerDJ/Demo Tracks/Demo Track 1.mp3"),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+
+        response.extend(Bytes::from(
+            DBMessage::new(
+                transaction_id.clone(),
+                DBRequestType::MenuItem,
+                ArgumentCollection::new(vec![
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x01]),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(""),
+                    DBField::from([0x00, 0x00, 0x00, 0x2f]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                    DBField::from([0x00, 0x00, 0x00, 0x00]),
+                ])
+            ),
+        ));
+
+        response.extend(Bytes::from(DBMessage::new(
+            transaction_id,
+            DBRequestType::MenuFooter,
+            ArgumentCollection::new(vec![]),
+        )));
+
+        response
+    }
+}
+
+struct QueryMountInfoController;
+impl Controller for QueryMountInfoController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let request_type = request.message.request_type;
+        let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
+        let items_to_render: u32 = 6u32;
+
+        bytes.extend(ok_request());
+        bytes.extend(Bytes::from(
+            ArgumentCollection::new(vec![
+                DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
+                DBField::from(items_to_render),
+            ]),
+        ));
+
+        Bytes::from(bytes)
+    }
 }
 
 impl Controller for RenderController {
@@ -596,6 +752,7 @@ impl Controller for RenderController {
             Some(DBRequestType::AlbumByArtistRequest) => self.render_album_by_artist(request, response, context),
             Some(DBRequestType::TitleByArtistAlbumRequest) => self.render_title_by_artist_album(request, response, context),
             Some(DBRequestType::MetadataRequest) => self.render_metadata(request, response, context),
+            Some(DBRequestType::MountInfoRequest) => self.render_mount_info(request, response, context),
             _ => Response { buffer: BytesMut::new() },
         })
     }
@@ -607,6 +764,7 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
         DBRequestType::RenderRequest => Some(Box::new(RenderController)),
         DBRequestType::RootMenuRequest => Some(Box::new(RootMenuController)),
         DBRequestType::TitleRequest => Some(Box::new(TitleController)),
+        DBRequestType::MountInfoRequest => Some(Box::new(QueryMountInfoController)),
         DBRequestType::AlbumByArtistRequest => Some(Box::new(NavigationController)),
         DBRequestType::TitleByArtistAlbumRequest => Some(Box::new(NavigationController)),
         DBRequestType::MetadataRequest => Some(Box::new(NavigationController)),
@@ -869,6 +1027,17 @@ mod test {
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MetadataRequest), context.previous_request);
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
+    }
+
+    #[test]
+    fn test_mount_info_dialog() {
+        let dialog = fixtures::mount_info_request_dialog();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::MountInfoRequest), context.previous_request);
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 }
