@@ -19,6 +19,7 @@ use super::packets::DBMessage;
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
+use super::metadata_type;
 use super::state::{
     LockedClientState as LockedSharedState,
     ClientState as SharedState,
@@ -219,7 +220,7 @@ fn build_message_header(transaction_id: &DBField) -> DBMessage {
     )
 }
 
-fn build_message_item(transaction_id: &DBField, metadata: (DBField, u8, u8, u8, u8)) -> DBMessage {
+fn build_message_item(transaction_id: &DBField, metadata: (DBField, u32, u8, u8, u8)) -> DBMessage {
     DBMessage::new(
         transaction_id.clone(),
         DBRequestType::MenuItem,
@@ -230,7 +231,7 @@ fn build_message_item(transaction_id: &DBField, metadata: (DBField, u8, u8, u8, 
             metadata.0,
             DBField::from([0x00, 0x00, 0x00, 0x02]),
             DBField::from(""),
-            DBField::from([0x00, 0x00, 0x00, metadata.1]),
+            DBField::from(metadata.1),
             DBField::from([0x00, 0x00, 0x00, 0x00]),
             DBField::from([0x00, 0x00, 0x00, 0x00]),
             DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -259,13 +260,13 @@ impl RenderController {
         response.extend(Bytes::from(build_message_header(&transaction_id)));
         response.extend_items(vec![
                 // MenuName, MetadataType, MenuId
-                ("\u{fffa}ARTIST\u{fffb}", 0x81, 0x02, 0x12),
-                ("\u{fffa}ALBUM\u{fffb}", 0x82, 0x03, 0x10),
-                ("\u{fffa}TRACK\u{fffb}", 0x83, 0x04, 0x10),
-                ("\u{fffa}KEY\u{fffb}", 0x8b, 0x0c, 0x0c),
-                ("\u{fffa}PLAYLIST\u{fffb}", 0x84, 0x05, 0x16),
-                ("\u{fffa}HISTORY\u{fffb}", 0x95, 0x16, 0x14),
-                ("\u{fffa}SEARCH\u{fffb}", 0x91, 0x12, 0x12),
+                ("\u{fffa}ARTIST\u{fffb}", metadata_type::ROOT_ARTIST, 0x02, 0x12),
+                ("\u{fffa}ALBUM\u{fffb}", metadata_type::ROOT_ALBUM, 0x03, 0x10),
+                ("\u{fffa}TRACK\u{fffb}", metadata_type::ROOT_TRACK, 0x04, 0x10),
+                ("\u{fffa}KEY\u{fffb}", metadata_type::ROOT_KEY, 0x0c, 0x0c),
+                ("\u{fffa}PLAYLIST\u{fffb}", metadata_type::ROOT_PLAYLIST, 0x05, 0x16),
+                ("\u{fffa}HISTORY\u{fffb}", metadata_type::ROOT_HISTORY, 0x16, 0x14),
+                ("\u{fffa}SEARCH\u{fffb}", metadata_type::ROOT_SEARCH, 0x12, 0x12),
             ].iter().map(|item| {
                 Bytes::from(build_message_item(&transaction_id, (
                     DBField::from(item.0),
@@ -287,7 +288,7 @@ impl RenderController {
         response.extend_items(vec![
             Bytes::from(build_message_item(&transaction_id, (
                 DBField::from("Loopmasters"),
-                0x07,
+                metadata_type::ARTIST,
                 0x01,
                 0x18,
                 0x00,
@@ -309,7 +310,7 @@ impl RenderController {
         response.extend_items(vec![
             Bytes::from(build_message_item(&transaction_id, (
                 DBField::from("Loopmasters"),
-                0x04,
+                metadata_type::TITLE,
                 0x05,
                 0x1a,
                 0x00
@@ -331,7 +332,7 @@ impl RenderController {
         response.extend_items(vec![
             Bytes::from(build_message_item(&transaction_id, (
                 DBField::from("Unknown"),
-                0x02,
+                metadata_type::ALBUM,
                 0x00,
                 0x10,
                 0x00,
@@ -350,14 +351,14 @@ impl RenderController {
 
         response.extend(Bytes::from(build_message_header(&transaction_id)));
         response.extend_items(vec![
-            ("Demo Track 1", 0x04, 0x05, 0x1a),
-            ("Demo Track 2", 0x04, 0x06, 0x1a),
+            ("Demo Track 1", 0x05, 0x1a),
+            ("Demo Track 2", 0x06, 0x1a),
         ].iter().map(|item| {
             Bytes::from(build_message_item(&transaction_id, (
                 DBField::from(item.0),
+                metadata_type::TITLE,
                 item.1,
                 item.2,
-                item.3,
                 0x01
             )))
         }).collect());
@@ -385,7 +386,7 @@ impl RenderController {
                     DBField::from("Demo Track 1"),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x04]),
+                    DBField::from(metadata_type::TITLE),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -405,7 +406,7 @@ impl RenderController {
                     DBField::from("Loopmasters"),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x07]),
+                    DBField::from(metadata_type::ARTIST),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -425,7 +426,7 @@ impl RenderController {
                     DBField::from(""),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
+                    DBField::from(metadata_type::ALBUM),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -440,12 +441,12 @@ impl RenderController {
                 DBRequestType::MenuItem,
                 ArgumentCollection::new(vec![
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0xac]),
+                    DBField::from([0x00, 0x00, 0x00, 0xac]),  // 172, DURATION in seconds?
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x0b]),
+                    DBField::from(metadata_type::DURATION),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -460,12 +461,12 @@ impl RenderController {
                 DBRequestType::MenuItem,
                 ArgumentCollection::new(vec![
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x32, 0x00]),
+                    DBField::from([0x00, 0x00, 0x32, 0x00]),  // <- 12800, BPM VALUE?
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x0d]),
+                    DBField::from(metadata_type::BPM),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -485,7 +486,7 @@ impl RenderController {
                     DBField::from("Tracks by www.loopmasters.com"),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x23]),
+                    DBField::from(metadata_type::COMMENT),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -505,7 +506,7 @@ impl RenderController {
                     DBField::from(""),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x0f]),
+                    DBField::from(metadata_type::KEY),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -525,7 +526,7 @@ impl RenderController {
                     DBField::from(""),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x0a]),
+                    DBField::from(metadata_type::RATING),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -545,7 +546,7 @@ impl RenderController {
                     DBField::from(""),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x13]),
+                    DBField::from(metadata_type::COLOR_NONE),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
@@ -565,7 +566,7 @@ impl RenderController {
                     DBField::from(""),
                     DBField::from([0x00, 0x00, 0x00, 0x02]),
                     DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x06]),
+                    DBField::from(metadata_type::GENRE),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),

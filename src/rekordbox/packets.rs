@@ -1,5 +1,5 @@
 use nom::bytes::complete::{tag, take};
-use nom::number::complete::{be_u16, be_u8};
+use nom::number::complete::{be_u16};
 use nom::IResult;
 use bytes::{Bytes, BytesMut};
 use super::db_field::{DBField, DBFieldType};
