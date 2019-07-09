@@ -11,7 +11,6 @@ enum Error {
     ParseError,
 }
 
-
 #[derive(Debug, PartialEq)]
 pub struct DBMessage {
     pub transaction_id: DBField,
@@ -71,19 +70,6 @@ impl DBMessage {
     }
 
     pub fn parse(i: &[u8]) -> IResult<&[u8], DBMessage> {
-        fn parse_arguments(input: &[u8]) -> IResult<&[u8], DBField> {
-            match be_u8(input) {
-                Err(err) => Err(err),
-                Ok((input, 0x11)) => {
-                    match take(1u32)(input) {
-                        Ok((input, value)) => Ok((input, DBField::from(value[0]))),
-                        Err(err) => Err(err),
-                    }
-                },
-                Ok((_input, _consumed)) => Err(nom::Err::Error((&[], nom::error::ErrorKind::Tag))),
-            }
-        }
-
         let (i, _magic) = DBMessage::magic(i)?;
         let (i, transaction_id) = DBMessage::transaction_id(i)?;
         let (i, request_type) = DBMessage::request_type(i)?;
@@ -257,6 +243,36 @@ mod test {
                 fixtures::raw_menu_footer_request(),
                 Bytes::from(DBMessage::parse(&fixtures::raw_menu_footer_request()).unwrap().1),
             );
+        }
+
+        #[test]
+        fn test_binary_parsing() {
+            let data = vec![
+                0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+                0x00, 0x1e, 0x10, 0x20, 0x04, 0x0f, 0x05, 0x14,
+                0x00, 0x00, 0x00, 0x0c, 0x06, 0x06, 0x06, 0x06,
+                0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+                0x11, 0x02, 0x08, 0x04, 0x01,
+                0x11, 0x00, 0x00, 0x00, 0x04,
+                0x11, 0x00, 0x00, 0x00, 0x05,
+                0x11, 0x00, 0x00, 0x00, 0x00,
+            ];
+
+            assert_eq!(
+                Ok((&[][..], DBMessage::new(
+                    DBField::from([0x05, 0x80, 0x00, 0x1e]),
+                    DBRequestType::PreviewWaveformRequest,
+                    ArgumentCollection::new(vec![
+                        DBField::from([0x02, 0x08, 0x04, 0x01]),
+                        DBField::from([0x00, 0x00, 0x00, 0x04]),
+                        DBField::from([0x00, 0x00, 0x00, 0x05]),
+                        DBField::from([0x00, 0x00, 0x00, 0x00]),
+                        DBField::new(DBFieldType::Binary, &[]),
+                    ]),
+                ))),
+                DBMessage::parse(&data),
+            )
         }
     }
 }
