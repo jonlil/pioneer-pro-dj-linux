@@ -10,6 +10,7 @@ enum ArgumentType {
     U16,
     U8,
     String,
+    Binary,
 }
 
 impl ArgumentType {
@@ -19,6 +20,7 @@ impl ArgumentType {
             0x05 => ArgumentType::U16,
             0x06 => ArgumentType::U32,
             0x02 => ArgumentType::String,
+            0x03 => ArgumentType::Binary,
             _ => panic!("Non-supported argument type."),
         }
     }
@@ -29,6 +31,7 @@ impl ArgumentType {
             ArgumentType::U16 => 0x05,
             ArgumentType::U32 => 0x06,
             ArgumentType::String => 0x02,
+            ArgumentType::Binary => 0x03,
         }
     }
 }
@@ -40,6 +43,7 @@ impl From<ArgumentType> for DBFieldType {
             ArgumentType::U16 => DBFieldType::U16,
             ArgumentType::U8 => DBFieldType::U8,
             ArgumentType::String => DBFieldType::String,
+            ArgumentType::Binary => DBFieldType::Binary,
         }
     }
 }
@@ -51,6 +55,7 @@ impl From<DBFieldType> for ArgumentType {
             DBFieldType::U16 => ArgumentType::U16,
             DBFieldType::U8 => ArgumentType::U8,
             DBFieldType::String => ArgumentType::String,
+            DBFieldType::Binary => ArgumentType::Binary,
         }
     }
 }
@@ -115,11 +120,10 @@ pub struct Argument {
 }
 
 impl Decode for Argument {
-    fn decode(kind: ArgumentType, value: &[u8]) -> IResult<&[u8], DBField> {
-        let (input, _) = take(1u8)(value)?;
-
+    fn decode(kind: ArgumentType, input: &[u8]) -> IResult<&[u8], DBField> {
         match kind {
             ArgumentType::String => {
+                let (input, _) = take(1u8)(input)?;
                 let (input, variable_size) = be_u32(input)?;
                 let (input, data) = take((variable_size - 1) * 2)(input)?;
                 let (input, _) = be_u16(input)?;
@@ -127,17 +131,22 @@ impl Decode for Argument {
                 Ok((input, DBField::new(DBFieldType::String, data)))
             },
             ArgumentType::U8 => {
+                let (input, _) = take(1u8)(input)?;
                 let (input, data) = take(1u8)(input)?;
                 Ok((input, DBField::new(DBFieldType::U8, data)))
             },
             ArgumentType::U16 => {
+                let (input, _) = take(1u8)(input)?;
                 let (input, data) = take(2u8)(input)?;
                 Ok((input, DBField::new(DBFieldType::U16, data)))
             },
             ArgumentType::U32 => {
+                let (input, _) = take(1u8)(input)?;
                 let (input, data) = take(4u8)(input)?;
-
                 Ok((input, DBField::new(DBFieldType::U32, data)))
+            },
+            ArgumentType::Binary => {
+                Ok((input, DBField::new(DBFieldType::Binary, &[])))
             },
         }
     }

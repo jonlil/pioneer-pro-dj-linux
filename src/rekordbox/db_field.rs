@@ -93,6 +93,7 @@ pub enum DBFieldType {
   U16,
   U32,
   String,
+  Binary,
 }
 
 impl DBFieldType {
@@ -101,6 +102,7 @@ impl DBFieldType {
             0x0f => DBFieldType::U8,
             0x10 => DBFieldType::U16,
             0x11 => DBFieldType::U32,
+            0x14 => DBFieldType::Binary,
             0x26 => DBFieldType::String,
             _ => {
                 return Err("unmatched type.")
@@ -113,6 +115,7 @@ impl DBFieldType {
             DBFieldType::U8 => 0x0f,
             DBFieldType::U16 => 0x10,
             DBFieldType::U32 => 0x11,
+            DBFieldType::Binary => 0x14,
             DBFieldType::String => 0x26,
         }
     }

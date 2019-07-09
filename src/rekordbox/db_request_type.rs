@@ -14,6 +14,7 @@ pub enum DBRequestType {
     MetadataRequest,
     MountInfoRequest,
     PlaylistRequest,
+    PreviewWaveformRequest,
     RenderRequest,
     RootMenuRequest,
     SearchQueryRequest,
@@ -35,6 +36,7 @@ impl DBRequestType {
             DBRequestType::Setup => "\x00\x00",
             DBRequestType::TitleByArtistAlbumRequest => "\x12\x02",
             DBRequestType::MetadataRequest => "\x20\x02",
+            DBRequestType::PreviewWaveformRequest => "\x20\x04",
             _ => "\x00\x00",
         })
     }
@@ -54,6 +56,7 @@ impl DBRequestType {
             4610_u16 => DBRequestType::TitleByArtistAlbumRequest,
             4864_u16 => DBRequestType::SearchQueryRequest,
             8194_u16 => DBRequestType::MetadataRequest,
+            8196_u16 => DBRequestType::PreviewWaveformRequest,
             8450_u16 => DBRequestType::MountInfoRequest,
             12288_u16 => DBRequestType::RenderRequest,
             16385_u16 => DBRequestType::MenuHeader,
