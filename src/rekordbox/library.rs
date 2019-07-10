@@ -741,6 +741,37 @@ impl Controller for QueryMountInfoController {
     }
 }
 
+struct LoadTrackController;
+impl Controller for LoadTrackController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let request_type = request.message.request_type;
+        let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
+
+        bytes.extend(Bytes::from(DBField::from([0x4e, 0x02])));
+        bytes.extend(Bytes::from(
+            ArgumentCollection::new(vec![
+                DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
+                DBField::from(0u32),
+                DBField::from([0x00, 0x00, 0x00, 0x38]),
+                DBField::new(DBFieldType::Binary, &[
+                    0x38, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe8, 0x03,
+                    0xe8, 0xc6, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00
+                ]),
+                DBField::from(1u32),
+            ]),
+        ));
+
+        Bytes::from(bytes)
+    }
+}
+
 impl Controller for RenderController {
     fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes {
         let response = Response::new();
@@ -768,6 +799,7 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
         DBRequestType::AlbumByArtistRequest => Some(Box::new(NavigationController)),
         DBRequestType::TitleByArtistAlbumRequest => Some(Box::new(NavigationController)),
         DBRequestType::MetadataRequest => Some(Box::new(NavigationController)),
+        DBRequestType::LoadTrackRequest => Some(Box::new(LoadTrackController)),
         DBRequestType::Setup => Some(Box::new(SetupController)),
         _ => None,
     }
@@ -1039,5 +1071,15 @@ mod test {
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MountInfoRequest), context.previous_request);
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
+    }
+
+    #[test]
+    fn test_load_track_request() {
+        let dialog = fixtures::load_track_request();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::LoadTrackRequest), context.previous_request);
     }
 }

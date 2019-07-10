@@ -105,6 +105,7 @@ impl RPCServer {
                         match &rpc {
                             RPC::Mount(_call, Mount::Procedure::Export(_export)) => call_event_handler("Export", rpc),
                             RPC::Mount(_call, Mount::Procedure::Mnt(_mnt)) => call_event_handler("Mnt", rpc),
+                            RPC::Error(err) => eprintln!("PortmapProgramHandler errored: {:?}", err),
                             _ => {
                                 eprintln!("Received non-implemented RPC Program: {:?}", rpc);
                             },

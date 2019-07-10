@@ -1,9 +1,27 @@
 use bytes::{Bytes, BytesMut};
 
+pub struct Binary {
+    value: Bytes,
+}
+
+impl Binary {
+    pub fn new(value: Bytes) -> Binary {
+        Binary {
+            value,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct DBField {
     pub kind: DBFieldType,
     pub value: Bytes,
+}
+
+impl From<Binary> for DBField {
+    fn from(value: Binary) -> DBField {
+        DBField::new(DBFieldType::Binary, &value.value)
+    }
 }
 
 impl From<u32> for DBField {
@@ -65,14 +83,22 @@ impl DBField {
     pub fn as_bytes(&self) -> Bytes {
         let mut buffer = Bytes::from(vec![]);
 
-        buffer.extend(vec![self.kind.value()]);
         match self.kind {
             DBFieldType::String => {
+                buffer.extend(vec![self.kind.value()]);
                 buffer.extend(vec![0x00, 0x00, 0x00, self.value.len() as u8 / 2+1]);
                 buffer.extend(self.value.to_vec());
                 buffer.extend(vec![0x00, 0x00]);
             },
+            DBFieldType::Binary => {
+                if self.value.len() > 0 {
+                    buffer.extend(vec![self.kind.value()]);
+                    buffer.extend((self.value.len() as u32).to_be_bytes().to_vec());
+                    buffer.extend(self.value.to_vec());
+                }
+            },
             _ => {
+                buffer.extend(vec![self.kind.value()]);
                 buffer.extend(self.value.to_vec());
             }
         };
@@ -175,5 +201,30 @@ mod test {
         let field = DBField::from("");
         assert_eq!(DBField::new(DBFieldType::String, &[]), field);
         assert_eq!(vec![0x26, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00], field.as_bytes());
+    }
+
+    #[test]
+    fn binary_to_dbfield() {
+        let fixture = Bytes::from(vec![
+            0x38, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe8, 0x03,
+            0x9b, 0x2a, 0x01, 0x00, 0xff, 0xff, 0xff, 0xff,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ]);
+
+        let field = DBField::from(Binary {
+            value: fixture.clone(),
+        });
+
+        let mut expected_value = BytesMut::from(vec![0x14, 0x00, 0x00, 0x00, 0x38]);
+        expected_value.extend(fixture);
+        assert_eq!(
+            expected_value,
+            field.as_bytes(),
+        );
     }
 }
