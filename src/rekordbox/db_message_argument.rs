@@ -146,6 +146,10 @@ impl Decode for Argument {
                 Ok((input, DBField::new(DBFieldType::U32, data)))
             },
             ArgumentType::Binary => {
+                if input.len() < 4 {
+                    return Ok((input, DBField::new(DBFieldType::Binary, &[])));
+                }
+
                 let (input, variable_size) = be_u32(input)?;
                 let (input, data) = take(variable_size)(input)?;
                 Ok((input, DBField::new(DBFieldType::Binary, data)))
