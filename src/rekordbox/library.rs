@@ -378,8 +378,8 @@ fn build_message_footer(transaction_id: &DBField) -> DBMessage {
         transaction_id.clone(),
         DBRequestType::MenuFooter,
         ArgumentCollection::new(vec![
-            DBField::from([0x00, 0x00, 0x00, 0x01]),
-            DBField::from([0x00, 0x00, 0x00, 0x00]),
+            DBField::from(1u32),
+            DBField::from(1u32),
         ]),
     )
 }
@@ -494,7 +494,7 @@ impl RenderController {
                 metadata_type::TITLE,
                 item.1,
                 item.2,
-                0x01
+                0x00
             )))
         }).collect());
 
@@ -875,6 +875,23 @@ impl Controller for QueryMountInfoController {
     }
 }
 
+struct TitleByArtistAlbumController;
+impl Controller for TitleByArtistAlbumController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let request_type = request.message.request_type;
+        let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
+
+        bytes.extend(Bytes::from(DBField::from([0x40, 0x00])));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
+            DBField::from(2u32),
+        ])));
+
+        Bytes::from(bytes)
+    }
+}
+
 struct LoadTrackController;
 impl Controller for LoadTrackController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
@@ -934,7 +951,7 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
         DBRequestType::RenderRequest => Some(Box::new(RenderController)),
         DBRequestType::RootMenuRequest => Some(Box::new(RootMenuController)),
         DBRequestType::Setup => Some(Box::new(SetupController)),
-        DBRequestType::TitleByArtistAlbumRequest => Some(Box::new(NavigationController)),
+        DBRequestType::TitleByArtistAlbumRequest => Some(Box::new(TitleByArtistAlbumController)),
         DBRequestType::TitleRequest => Some(Box::new(TitleController)),
         _ => None,
     }
@@ -1127,42 +1144,25 @@ mod test {
     }
 
     #[test]
-    fn test_root_menu_request_handling() {
+    fn test_root_menu_dialog() {
+        let dialog = fixtures::root_menu_dialog();
         let mut context = ClientState::new(SharedState::new());
-        let request_handler = RequestHandler::new(
-            Box::new(RootMenuController {}),
-            fixtures::root_menu_request().unwrap().1,
-            &mut context,
-        );
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
-        assert_eq!(request_handler.respond_to(), fixtures::root_menu_response_packet());
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::RootMenuRequest), context.previous_request);
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
     #[test]
-    fn test_artist_request_response() {
+    fn test_artist_dialog_response() {
         let dialog = fixtures::artist_dialog();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
         let mut context = ClientState::new(SharedState::new());
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::ArtistRequest), context.previous_request);
-    }
-
-    #[test]
-    fn test_rendering_artist_request() {
-        let response = fixtures::render_artist_response();
-        let render_artist_request = fixtures::render_artist_request();
-
-        let mut context = ClientState::new(SharedState::new());
-        context.previous_request = Some(DBRequestType::ArtistRequest);
-
-        let request_handler = RequestHandler::new(
-            Box::new(RenderController {}),
-            DBMessage::parse(&render_artist_request).unwrap().1,
-            &mut context,
-        );
-
-        assert_eq!(response, request_handler.respond_to());
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
     #[test]
@@ -1173,7 +1173,6 @@ mod test {
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::AlbumByArtistRequest), context.previous_request);
-
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
@@ -1185,7 +1184,6 @@ mod test {
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
-
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 

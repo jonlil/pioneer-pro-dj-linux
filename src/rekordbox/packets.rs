@@ -6,6 +6,33 @@ use super::db_field::{DBField, DBFieldType, Binary};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
 
+type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
+type DBMessageU32<'a> = IResult<&'a [u8], u32>;
+pub type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
+
+#[derive(Debug, PartialEq)]
+pub struct ManyDBMessages(Vec<DBMessage>);
+
+impl ManyDBMessages {
+    pub fn new(messages: Vec<DBMessage>) -> ManyDBMessages {
+        ManyDBMessages(messages)
+    }
+}
+
+struct ManyDBMessagesIterator {
+    items: ManyDBMessages,
+    index: usize,
+}
+
+impl IntoIterator for ManyDBMessages {
+    type Item = DBMessage;
+    type IntoIter = ::std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum Error {
     ParseError,
@@ -17,10 +44,6 @@ pub struct DBMessage {
     pub request_type: DBRequestType,
     pub arguments: ArgumentCollection,
 }
-
-type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
-type DBMessageU32<'a> = IResult<&'a [u8], u32>;
-pub type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
 
 impl DBMessage {
     const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
@@ -102,6 +125,15 @@ impl From<DBMessage> for Bytes {
         buffer.extend(Bytes::from(message.arguments));
 
         Bytes::from(buffer)
+    }
+}
+
+impl From<ManyDBMessages> for Bytes {
+    fn from(messages: ManyDBMessages) -> Bytes {
+        Bytes::from(messages.into_iter().fold(BytesMut::new(), |mut acc, message| {
+            acc.extend(Bytes::from(message));
+            acc
+        }))
     }
 }
 
@@ -197,7 +229,7 @@ mod test {
                     DBField::from([0x00, 0xff, 0xff, 0xff]),
                 ]),
             })),
-            fixtures::root_menu_request(),
+            DBMessage::parse(&fixtures::root_menu_dialog().0),
         );
     }
 
@@ -219,26 +251,6 @@ mod test {
         assert_eq!(
             b"\x11\x00\x00\x00\x01",
             &DBField::from([0x00, 0x00, 0x00, 0x01]).as_bytes()[..],
-        );
-    }
-
-    #[test]
-    fn construct_menu_footer() {
-        assert_eq!(
-            DBMessage::parse(&fixtures::raw_menu_footer_request()).unwrap().1,
-            DBMessage::new(
-                DBField::from([0x05, 0x80, 0x00, 0x0f]),
-                DBRequestType::MenuFooter,
-                ArgumentCollection::new(vec![]),
-            ),
-        );
-    }
-
-    #[test]
-    fn menu_footer_to_bytes() {
-        assert_eq!(
-            fixtures::raw_menu_footer_request(),
-            Bytes::from(DBMessage::parse(&fixtures::raw_menu_footer_request()).unwrap().1),
         );
     }
 
