@@ -3,6 +3,7 @@ use nom::IResult;
 use nom::bytes::complete::{take};
 use nom::number::complete::{be_u32, be_u16};
 use super::db_field::{DBField, DBFieldType};
+use std::ops::Index;
 
 #[derive(Debug, PartialEq, Clone)]
 enum ArgumentType {
@@ -63,6 +64,13 @@ impl From<DBFieldType> for ArgumentType {
 #[derive(Debug, PartialEq)]
 pub struct ArgumentCollection {
     items: Vec<DBField>,
+}
+
+impl Index<usize> for ArgumentCollection {
+    type Output = DBField;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.items[index]
+    }
 }
 
 impl ArgumentCollection {
