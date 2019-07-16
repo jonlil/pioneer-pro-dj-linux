@@ -14,7 +14,6 @@ use tokio::io::{read_exact, write_all};
 use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
 
-use crate::rpc::server::convert_u16_to_two_u8s_be;
 use super::packets::DBMessage;
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
@@ -483,7 +482,8 @@ impl RenderController {
 
         response.extend(Bytes::from(build_message_header(&transaction_id)));
         let mut items: Vec<(&str, u8, u8)> = vec![("Demo Track 1", 0x05, 0x1a)];
-        eprintln!("{:#?}", request.message.arguments[2 as usize]);
+
+        // This seems to be related to only query one MenuItem
         if request.message.arguments[2 as usize].value > Bytes::from(vec![0x00, 0x00, 0x00, 0x01]) {
             items.extend(vec![("Demo Track 2", 0x06, 0x1a)]);
         }
@@ -883,9 +883,28 @@ impl Controller for TitleByArtistAlbumController {
         let request_type_value = request_type.value();
 
         bytes.extend(Bytes::from(DBField::from([0x40, 0x00])));
+        // TODO: Implement std::iter::Extend for BytesMut
+        // bytes.extend(ArgumentCollection::new(vec![]));
         bytes.extend(Bytes::from(ArgumentCollection::new(vec![
             DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
             DBField::from(2u32),
+        ])));
+
+        Bytes::from(bytes)
+    }
+}
+
+struct MetadataController;
+impl Controller for MetadataController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let request_type = request.message.request_type;
+        let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
+
+        bytes.extend(Bytes::from(DBField::from([0x40, 0x00])));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
+            DBField::from(10u32),
         ])));
 
         Bytes::from(bytes)
@@ -903,19 +922,10 @@ impl Controller for LoadTrackController {
         bytes.extend(Bytes::from(
             ArgumentCollection::new(vec![
                 DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
-                DBField::from(0u32),
-                DBField::from([0x00, 0x00, 0x00, 0x38]),
-                DBField::new(DBFieldType::Binary, &[
-                    0x38, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe8, 0x03,
-                    0xe8, 0xc6, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00
-                ]),
                 DBField::from(1u32),
+                DBField::from(0u32),
+                DBField::new(DBFieldType::Binary, &[]),
+                DBField::from(0u32),
             ]),
         ));
 
@@ -945,7 +955,7 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
         DBRequestType::AlbumByArtistRequest => Some(Box::new(NavigationController)),
         DBRequestType::ArtistRequest => Some(Box::new(NavigationController)),
         DBRequestType::LoadTrackRequest => Some(Box::new(LoadTrackController)),
-        DBRequestType::MetadataRequest => Some(Box::new(NavigationController)),
+        DBRequestType::MetadataRequest => Some(Box::new(MetadataController)),
         DBRequestType::MountInfoRequest => Some(Box::new(QueryMountInfoController)),
         DBRequestType::PreviewWaveformRequest => Some(Box::new(PreviewWaveformController)),
         DBRequestType::RenderRequest => Some(Box::new(RenderController)),
@@ -1041,9 +1051,9 @@ impl DBLibraryServer {
             .incoming()
             .map_err(|e| println!("failed to accept socket; error = {:?}", e))
             .for_each(move |socket| {
-                let port = rand::thread_rng().gen_range(60315, 65315);
+                let port: u16 = rand::thread_rng().gen_range(60315, 65315);
                 let state = state.clone();
-                let allocated_port = port.to_u8_vec();
+                let allocated_port = port.to_be_bytes().to_vec();
 
                 let processor = read_exact(socket, vec![0; 19])
                     .and_then(move |(socket, _bytes)| {
@@ -1061,16 +1071,6 @@ impl DBLibraryServer {
 
     pub fn run(state: LockedSharedState) {
         Self::spawn("0.0.0.0:12523", state.clone());
-    }
-}
-
-trait U16ToVec {
-    fn to_u8_vec(self) -> Vec<u8>;
-}
-
-impl U16ToVec for u16 {
-    fn to_u8_vec(self) -> Vec<u8> {
-        convert_u16_to_two_u8s_be(self)
     }
 }
 
@@ -1179,6 +1179,17 @@ mod test {
     #[test]
     fn test_title_by_artist_dialog() {
         let dialog = fixtures::title_by_artist_album_dialog();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
+    }
+
+    #[test]
+    fn test_title_by_artist_dialog_single_track() {
+        let dialog = fixtures::title_by_artist_album_single_track_dialog();
         let mut context = ClientState::new(SharedState::new());
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 

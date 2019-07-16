@@ -62,22 +62,35 @@ impl From<DBFieldType> for ArgumentType {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct ArgumentCollection {
-    items: Vec<DBField>,
+pub struct ArgumentCollection(Vec<DBField>);
+
+impl IntoIterator for ArgumentCollection {
+    type Item = DBField;
+    type IntoIter = ::std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
 }
 
 impl Index<usize> for ArgumentCollection {
     type Output = DBField;
     fn index(&self, index: usize) -> &Self::Output {
-        &self.items[index]
+        &self.0[index]
     }
 }
 
 impl ArgumentCollection {
     pub fn new(items: Vec<DBField>) -> ArgumentCollection {
-        ArgumentCollection {
-            items,
-        }
+        ArgumentCollection(items)
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<DBField> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 
     pub fn decode(input: &[u8]) -> IResult<&[u8], ArgumentCollection> {
@@ -92,19 +105,17 @@ impl ArgumentCollection {
             args.1
         }).collect::<Vec<DBField>>();
 
-        Ok((&[][..], ArgumentCollection {
-            items: items,
-        }))
+        Ok((&[][..], ArgumentCollection(items)))
     }
 }
 
 impl From<ArgumentCollection> for Bytes {
     fn from(collection: ArgumentCollection) -> Self {
         let mut buffer = BytesMut::new();
-        let arg_count = collection.items.len() as u8;
+        let arg_count = collection.len() as u8;
 
         buffer.extend(vec![0x0f, arg_count, 0x14, 0x00, 0x00, 0x00, 0x0c]);
-        buffer.extend(&collection.items.iter().map(|item| {
+        buffer.extend(&collection.iter().map(|item| {
             ArgumentType::from(item.kind.clone()).value()
         }).collect::<Vec<u8>>());
 
@@ -112,7 +123,7 @@ impl From<ArgumentCollection> for Bytes {
             buffer.extend(Bytes::from(vec![0x00; 12 - arg_count as usize]));
         }
 
-        for item in collection.items.into_iter() {
+        for item in collection.into_iter() {
             buffer.extend(item.as_bytes());
         }
 
@@ -238,31 +249,7 @@ mod test {
     #[test]
     fn test_decoding_from_raw_data_to_argument_collection() {
         assert_eq!(
-            Ok((&[][..], ArgumentCollection {
-                items: vec![
-                    DBField { kind: DBFieldType::U32, value: Bytes::from("\x02\x02\x04\x01") },
-                    DBField { kind: DBFieldType::U16, value: Bytes::from("\x00\x00") },
-                    DBField { kind: DBFieldType::U8, value: Bytes::from("\x00") },
-                    DBField { kind: DBFieldType::U32, value: Bytes::from("\x00\x00\x00\x01") },
-                    DBField { kind: DBFieldType::U32, value: Bytes::from("\x00\x00\x00\x02") },
-                    DBField { kind: DBFieldType::U32, value: Bytes::from("\x00\x00\x00\x03") },
-                    DBField {
-                        kind: DBFieldType::String,
-                        value: Bytes::from(vec![
-                            0x00, 0x55, 0x00, 0x6e, 0x00, 0x6b, 0x00,
-                            0x6e, 0x00, 0x6f, 0x00, 0x77, 0x00, 0x6e,
-                        ]),
-                    },
-                ],
-            })),
-            ArgumentCollection::decode(PARTIAL_RAW_MESSAGE)
-        );
-    }
-
-    #[test]
-    fn test_encode_from_argument_collection_to_raw_bytes() {
-        let arguments = ArgumentCollection {
-            items: vec![
+            Ok((&[][..], ArgumentCollection(vec![
                 DBField { kind: DBFieldType::U32, value: Bytes::from("\x02\x02\x04\x01") },
                 DBField { kind: DBFieldType::U16, value: Bytes::from("\x00\x00") },
                 DBField { kind: DBFieldType::U8, value: Bytes::from("\x00") },
@@ -276,8 +263,28 @@ mod test {
                         0x6e, 0x00, 0x6f, 0x00, 0x77, 0x00, 0x6e,
                     ]),
                 },
-            ],
-        };
+            ]))),
+            ArgumentCollection::decode(PARTIAL_RAW_MESSAGE)
+        );
+    }
+
+    #[test]
+    fn test_encode_from_argument_collection_to_raw_bytes() {
+        let arguments = ArgumentCollection(vec![
+            DBField { kind: DBFieldType::U32, value: Bytes::from("\x02\x02\x04\x01") },
+            DBField { kind: DBFieldType::U16, value: Bytes::from("\x00\x00") },
+            DBField { kind: DBFieldType::U8, value: Bytes::from("\x00") },
+            DBField { kind: DBFieldType::U32, value: Bytes::from("\x00\x00\x00\x01") },
+            DBField { kind: DBFieldType::U32, value: Bytes::from("\x00\x00\x00\x02") },
+            DBField { kind: DBFieldType::U32, value: Bytes::from("\x00\x00\x00\x03") },
+            DBField {
+                kind: DBFieldType::String,
+                value: Bytes::from(vec![
+                    0x00, 0x55, 0x00, 0x6e, 0x00, 0x6b, 0x00,
+                    0x6e, 0x00, 0x6f, 0x00, 0x77, 0x00, 0x6e,
+                ]),
+            },
+        ]);
 
         assert_eq!(
             Bytes::from(PARTIAL_RAW_MESSAGE),
