@@ -91,7 +91,7 @@ impl RPCServer {
             let reply = call.to_reply(vec![
                 vec![0x00, 0x00],
                 // TODO: Implement support for le.
-                convert_u16_to_two_u8s_be(reply_port.get_port())
+                reply_port.get_port().to_be_bytes().to_vec(),
             ]);
 
             // Possible todo: Implement thread pooling to avoid too many concurrent threads
@@ -133,10 +133,4 @@ impl PortmapProgramHandler {
             Err(err) => callback(RPC::Error(err.to_string())),
         };
     }
-}
-
-pub fn convert_u16_to_two_u8s_be(integer: u16) -> Vec<u8> {
-    let mut res = vec![];
-    res.write_u16::<BigEndian>(integer).unwrap();
-    res
 }

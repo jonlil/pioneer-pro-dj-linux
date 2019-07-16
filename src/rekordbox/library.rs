@@ -14,7 +14,6 @@ use tokio::io::{read_exact, write_all};
 use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
 
-use crate::rpc::server::convert_u16_to_two_u8s_be;
 use super::packets::DBMessage;
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
@@ -173,6 +172,137 @@ impl Controller for NavigationController {
     }
 }
 
+struct PreviewWaveformController;
+impl Controller for PreviewWaveformController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let mut bytes: BytesMut = request.to_response();
+        bytes.extend(Bytes::from(DBField::from([0x44, 0x02])));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, 0x20, 0x04]),
+            DBField::from(0u32),
+            DBField::from([0x00, 0x00, 0x03, 0x88]),
+            DBField::new(DBFieldType::Binary, &[
+                0x18, 0x00, 0x15, 0x00,
+                0x16, 0x00, 0x18, 0x00, 0x14, 0x00, 0x0d, 0x00,
+                0x18, 0x00, 0x15, 0x00, 0x17, 0x00, 0x17, 0x00,
+                0x15, 0x00, 0x17, 0x00, 0x18, 0x00, 0x17, 0x00,
+                0x18, 0x00, 0x17, 0x00, 0x15, 0x01, 0x0d, 0x01,
+                0x17, 0x00, 0x17, 0x00, 0x17, 0x00, 0x17, 0x00,
+                0x17, 0x00, 0x15, 0x00, 0x18, 0x00, 0x15, 0x00,
+                0x16, 0x00, 0x18, 0x00, 0x11, 0x01, 0x11, 0x01,
+                0x17, 0x00, 0x17, 0x00, 0x15, 0x00, 0x17, 0x00,
+                0x18, 0x00, 0x16, 0x00, 0x15, 0x00, 0x15, 0x00,
+                0x16, 0x03, 0x15, 0x03, 0x12, 0x03, 0x13, 0x03,
+                0x0b, 0x05, 0x0f, 0x05, 0x14, 0x03, 0x12, 0x03,
+                0x12, 0x03, 0x12, 0x03, 0x13, 0x02, 0x13, 0x02,
+                0x13, 0x03, 0x15, 0x03, 0x16, 0x03, 0x12, 0x03,
+                0x0f, 0x05, 0x08, 0x05, 0x15, 0x03, 0x14, 0x03,
+                0x12, 0x03, 0x12, 0x03, 0x13, 0x00, 0x16, 0x00,
+                0x12, 0x03, 0x13, 0x03, 0x15, 0x03, 0x13, 0x03,
+                0x12, 0x03, 0x13, 0x03, 0x08, 0x05, 0x0e, 0x05,
+                0x16, 0x03, 0x12, 0x03, 0x12, 0x02, 0x13, 0x02,
+                0x16, 0x03, 0x0d, 0x03, 0x13, 0x03, 0x15, 0x03,
+                0x0e, 0x05, 0x10, 0x05, 0x12, 0x03, 0x13, 0x03,
+                0x13, 0x03, 0x13, 0x03, 0x12, 0x03, 0x12, 0x03,
+                0x13, 0x00, 0x16, 0x00, 0x12, 0x03, 0x13, 0x03,
+                0x12, 0x05, 0x08, 0x05, 0x13, 0x03, 0x12, 0x03,
+                0x13, 0x03, 0x14, 0x03, 0x16, 0x03, 0x0d, 0x03,
+                0x13, 0x02, 0x15, 0x02, 0x10, 0x03, 0x15, 0x03,
+                0x13, 0x03, 0x15, 0x03, 0x09, 0x05, 0x12, 0x05,
+                0x12, 0x03, 0x13, 0x03, 0x13, 0x03, 0x13, 0x03,
+                0x0d, 0x02, 0x13, 0x02, 0x15, 0x03, 0x14, 0x03,
+                0x13, 0x03, 0x13, 0x03, 0x0b, 0x05, 0x0f, 0x05,
+                0x13, 0x03, 0x0f, 0x03, 0x12, 0x03, 0x16, 0x03,
+                0x13, 0x02, 0x12, 0x02, 0x13, 0x03, 0x15, 0x03,
+                0x10, 0x03, 0x14, 0x03, 0x0f, 0x05, 0x0b, 0x05,
+                0x15, 0x03, 0x13, 0x03, 0x0f, 0x03, 0x12, 0x03,
+                0x16, 0x03, 0x13, 0x03, 0x0e, 0x02, 0x13, 0x02,
+                0x15, 0x03, 0x16, 0x03, 0x0d, 0x02, 0x11, 0x02,
+                0x05, 0x05, 0x0f, 0x05, 0x11, 0x03, 0x0f, 0x03,
+                0x12, 0x03, 0x0f, 0x03, 0x13, 0x02, 0x0e, 0x02,
+                0x12, 0x03, 0x12, 0x03, 0x0e, 0x03, 0x12, 0x03,
+                0x0e, 0x05, 0x09, 0x05, 0x11, 0x03, 0x14, 0x03,
+                0x12, 0x03, 0x12, 0x03, 0x0e, 0x02, 0x14, 0x02,
+                0x0d, 0x03, 0x11, 0x03, 0x13, 0x03, 0x13, 0x03,
+                0x04, 0x05, 0x0c, 0x05, 0x10, 0x03, 0x12, 0x03,
+                0x11, 0x03, 0x0f, 0x03, 0x14, 0x02, 0x15, 0x02,
+                0x12, 0x02, 0x0a, 0x02, 0x11, 0x03, 0x12, 0x03,
+                0x06, 0x05, 0x0e, 0x05, 0x10, 0x03, 0x10, 0x03,
+                0x12, 0x03, 0x12, 0x03, 0x0e, 0x02, 0x11, 0x02,
+                0x10, 0x03, 0x14, 0x03, 0x0a, 0x03, 0x13, 0x03,
+                0x0a, 0x03, 0x11, 0x03, 0x10, 0x03, 0x13, 0x03,
+                0x10, 0x03, 0x11, 0x03, 0x12, 0x03, 0x0d, 0x03,
+                0x12, 0x02, 0x12, 0x02, 0x13, 0x03, 0x0e, 0x03,
+                0x0d, 0x05, 0x06, 0x05, 0x12, 0x03, 0x0f, 0x03,
+                0x0d, 0x03, 0x15, 0x03, 0x10, 0x03, 0x0a, 0x03,
+                0x03, 0x05, 0x04, 0x05, 0x02, 0x05, 0x03, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x0e, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x05, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x0b, 0x05, 0x04, 0x05, 0x04, 0x05, 0x03, 0x05,
+                0x03, 0x05, 0x02, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x06, 0x05, 0x09, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x05, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x0a, 0x05, 0x04, 0x05, 0x04, 0x05,
+                0x03, 0x05, 0x03, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x04, 0x05, 0x08, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x05, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x05, 0x05, 0x06, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x04, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x0a, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x05, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x15, 0x02, 0x13, 0x02, 0x14, 0x03, 0x15, 0x03,
+                0x13, 0x03, 0x15, 0x03, 0x14, 0x02, 0x12, 0x02,
+                0x10, 0x05, 0x0f, 0x05, 0x17, 0x02, 0x17, 0x02,
+                0x0b, 0x05, 0x11, 0x05, 0x15, 0x03, 0x11, 0x03,
+                0x17, 0x03, 0x13, 0x03, 0x16, 0x03, 0x14, 0x03,
+                0x16, 0x00, 0x15, 0x00, 0x14, 0x05, 0x0c, 0x05,
+                0x15, 0x03, 0x15, 0x03, 0x15, 0x03, 0x15, 0x03,
+                0x0f, 0x03, 0x15, 0x03, 0x16, 0x03, 0x15, 0x03,
+                0x11, 0x02, 0x16, 0x02, 0x12, 0x05, 0x10, 0x05,
+                0x17, 0x02, 0x17, 0x02, 0x09, 0x05, 0x13, 0x05,
+                0x12, 0x03, 0x16, 0x03, 0x15, 0x03, 0x14, 0x03,
+                0x16, 0x02, 0x14, 0x02, 0x15, 0x03, 0x15, 0x03,
+                0x11, 0x05, 0x0c, 0x05, 0x12, 0x03, 0x16, 0x03,
+                0x14, 0x03, 0x13, 0x03, 0x14, 0x03, 0x15, 0x03,
+                0x0f, 0x00, 0x16, 0x00, 0x0c, 0x03, 0x12, 0x03,
+                0x17, 0x02, 0x17, 0x02, 0x0a, 0x03, 0x11, 0x03,
+                0x15, 0x03, 0x10, 0x03, 0x16, 0x03, 0x14, 0x03,
+                0x15, 0x02, 0x13, 0x02, 0x15, 0x05, 0x08, 0x05,
+                0x17, 0x02, 0x17, 0x02, 0x0a, 0x05, 0x10, 0x05,
+                0x14, 0x03, 0x17, 0x03, 0x11, 0x03, 0x15, 0x03,
+                0x14, 0x03, 0x15, 0x03, 0x14, 0x00, 0x17, 0x00,
+                0x11, 0x03, 0x16, 0x03, 0x12, 0x05, 0x0a, 0x05,
+                0x16, 0x03, 0x14, 0x03, 0x11, 0x03, 0x14, 0x03,
+                0x15, 0x03, 0x16, 0x03, 0x14, 0x02, 0x10, 0x02,
+                0x16, 0x03, 0x14, 0x03, 0x15, 0x03, 0x14, 0x03,
+                0x0a, 0x05, 0x11, 0x05, 0x0f, 0x03, 0x17, 0x03,
+                0x0d, 0x04, 0x05, 0x04, 0x02, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x02, 0x05, 0x02, 0x05, 0x02, 0x05, 0x02, 0x05,
+                0x02, 0x03, 0x02, 0x05, 0x0e, 0x0e, 0x0f, 0x0f,
+                0x0e, 0x0f, 0x0f, 0x0e, 0x0f, 0x0e, 0x0c, 0x0e,
+                0x0e, 0x0c, 0x0e, 0x0e, 0x0c, 0x0e, 0x0e, 0x0c,
+                0x0e, 0x0e, 0x0c, 0x0e, 0x0e, 0x0c, 0x0e, 0x0e,
+                0x0c, 0x0e, 0x0e, 0x0c, 0x0e, 0x0c, 0x0e, 0x0d,
+                0x0d, 0x0c, 0x0e, 0x0e, 0x0c, 0x0d, 0x0e, 0x0d,
+                0x0d, 0x0d, 0x0c, 0x0e, 0x0d, 0x0c, 0x0d, 0x0e,
+                0x08, 0x02, 0x07, 0x04, 0x05, 0x02, 0x07, 0x04,
+                0x02, 0x05, 0x02, 0x07, 0x04, 0x05, 0x04, 0x05,
+                0x05, 0x05, 0x0e, 0x0e, 0x0e, 0x0d, 0x0e, 0x0d,
+                0x0e, 0x0e, 0x0e, 0x0c, 0x0e, 0x0e, 0x0c, 0x0e,
+                0x0e, 0x0d, 0x0e, 0x0d, 0x0e, 0x0e, 0x0e, 0x0c,
+                0x0e, 0x0e, 0x0d, 0x0e, 0x02, 0x01, 0x01, 0x01,
+                0x9e, 0xeb, 0x78, 0x10
+            ]),
+        ])));
+
+        Bytes::from(bytes)
+    }
+}
+
 struct TitleController;
 impl Controller for TitleController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
@@ -247,8 +377,8 @@ fn build_message_footer(transaction_id: &DBField) -> DBMessage {
         transaction_id.clone(),
         DBRequestType::MenuFooter,
         ArgumentCollection::new(vec![
-            DBField::from([0x00, 0x00, 0x00, 0x01]),
-            DBField::from([0x00, 0x00, 0x00, 0x00]),
+            DBField::from(1u32),
+            DBField::from(1u32),
         ]),
     )
 }
@@ -351,16 +481,20 @@ impl RenderController {
         let transaction_id = request.message.transaction_id;
 
         response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend_items(vec![
-            ("Demo Track 1", 0x05, 0x1a),
-            ("Demo Track 2", 0x06, 0x1a),
-        ].iter().map(|item| {
+        let mut items: Vec<(&str, u8, u8)> = vec![("Demo Track 1", 0x05, 0x1a)];
+
+        // This seems to be related to only query one MenuItem
+        if request.message.arguments[2 as usize].value > Bytes::from(vec![0x00, 0x00, 0x00, 0x01]) {
+            items.extend(vec![("Demo Track 2", 0x06, 0x1a)]);
+        }
+
+        response.extend_items(items.iter().map(|item| {
             Bytes::from(build_message_item(&transaction_id, (
                 DBField::from(item.0),
                 metadata_type::TITLE,
                 item.1,
                 item.2,
-                0x01
+                0x00
             )))
         }).collect());
 
@@ -741,6 +875,42 @@ impl Controller for QueryMountInfoController {
     }
 }
 
+struct TitleByArtistAlbumController;
+impl Controller for TitleByArtistAlbumController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let request_type = request.message.request_type;
+        let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
+
+        bytes.extend(Bytes::from(DBField::from([0x40, 0x00])));
+        // TODO: Implement std::iter::Extend for BytesMut
+        // bytes.extend(ArgumentCollection::new(vec![]));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
+            DBField::from(2u32),
+        ])));
+
+        Bytes::from(bytes)
+    }
+}
+
+struct MetadataController;
+impl Controller for MetadataController {
+    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+        let request_type = request.message.request_type;
+        let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
+
+        bytes.extend(Bytes::from(DBField::from([0x40, 0x00])));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
+            DBField::from(10u32),
+        ])));
+
+        Bytes::from(bytes)
+    }
+}
+
 struct LoadTrackController;
 impl Controller for LoadTrackController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
@@ -752,19 +922,10 @@ impl Controller for LoadTrackController {
         bytes.extend(Bytes::from(
             ArgumentCollection::new(vec![
                 DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
-                DBField::from(0u32),
-                DBField::from([0x00, 0x00, 0x00, 0x38]),
-                DBField::new(DBFieldType::Binary, &[
-                    0x38, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xe8, 0x03,
-                    0xe8, 0xc6, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00
-                ]),
                 DBField::from(1u32),
+                DBField::from(0u32),
+                DBField::new(DBFieldType::Binary, &[]),
+                DBField::from(0u32),
             ]),
         ));
 
@@ -791,16 +952,17 @@ impl Controller for RenderController {
 
 fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
     match request_type {
+        DBRequestType::AlbumByArtistRequest => Some(Box::new(NavigationController)),
         DBRequestType::ArtistRequest => Some(Box::new(NavigationController)),
+        DBRequestType::LoadTrackRequest => Some(Box::new(LoadTrackController)),
+        DBRequestType::MetadataRequest => Some(Box::new(MetadataController)),
+        DBRequestType::MountInfoRequest => Some(Box::new(QueryMountInfoController)),
+        DBRequestType::PreviewWaveformRequest => Some(Box::new(PreviewWaveformController)),
         DBRequestType::RenderRequest => Some(Box::new(RenderController)),
         DBRequestType::RootMenuRequest => Some(Box::new(RootMenuController)),
-        DBRequestType::TitleRequest => Some(Box::new(TitleController)),
-        DBRequestType::MountInfoRequest => Some(Box::new(QueryMountInfoController)),
-        DBRequestType::AlbumByArtistRequest => Some(Box::new(NavigationController)),
-        DBRequestType::TitleByArtistAlbumRequest => Some(Box::new(NavigationController)),
-        DBRequestType::MetadataRequest => Some(Box::new(NavigationController)),
-        DBRequestType::LoadTrackRequest => Some(Box::new(LoadTrackController)),
         DBRequestType::Setup => Some(Box::new(SetupController)),
+        DBRequestType::TitleByArtistAlbumRequest => Some(Box::new(TitleByArtistAlbumController)),
+        DBRequestType::TitleRequest => Some(Box::new(TitleController)),
         _ => None,
     }
 }
@@ -816,11 +978,12 @@ fn process(
 
     match DBMessage::parse(&bytes) {
         Ok((_unprocessed_bytes, message)) => {
-            eprintln!("previous_request: {:?}\nrequest_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
-                context.previous_request,
-                message.request_type,
-                message.arguments,
-                peer_addr);
+            eprintln!("{:?}, {:?}", message.request_type, context.previous_request);
+            //eprintln!("previous_request: {:?}\nrequest_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
+            //    context.previous_request,
+            //    message.request_type,
+            //    message.arguments,
+            //    peer_addr);
 
             if let Some(request_handler) = get_controller(&message.request_type) {
                 let request_type = &message.request_type.clone();
@@ -833,6 +996,8 @@ fn process(
                 context.previous_request = Some(*request_type);
 
                 return bytes;
+            } else {
+                eprintln!("Not covered: {:?}", bytes);
             }
         },
         Err(nom::Err::Error((bytes, _))) => {
@@ -886,9 +1051,9 @@ impl DBLibraryServer {
             .incoming()
             .map_err(|e| println!("failed to accept socket; error = {:?}", e))
             .for_each(move |socket| {
-                let port = rand::thread_rng().gen_range(60315, 65315);
+                let port: u16 = rand::thread_rng().gen_range(60315, 65315);
                 let state = state.clone();
-                let allocated_port = port.to_u8_vec();
+                let allocated_port = port.to_be_bytes().to_vec();
 
                 let processor = read_exact(socket, vec![0; 19])
                     .and_then(move |(socket, _bytes)| {
@@ -906,16 +1071,6 @@ impl DBLibraryServer {
 
     pub fn run(state: LockedSharedState) {
         Self::spawn("0.0.0.0:12523", state.clone());
-    }
-}
-
-trait U16ToVec {
-    fn to_u8_vec(self) -> Vec<u8>;
-}
-
-impl U16ToVec for u16 {
-    fn to_u8_vec(self) -> Vec<u8> {
-        convert_u16_to_two_u8s_be(self)
     }
 }
 
@@ -989,42 +1144,25 @@ mod test {
     }
 
     #[test]
-    fn test_root_menu_request_handling() {
+    fn test_root_menu_dialog() {
+        let dialog = fixtures::root_menu_dialog();
         let mut context = ClientState::new(SharedState::new());
-        let request_handler = RequestHandler::new(
-            Box::new(RootMenuController {}),
-            fixtures::root_menu_request().unwrap().1,
-            &mut context,
-        );
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
-        assert_eq!(request_handler.respond_to(), fixtures::root_menu_response_packet());
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::RootMenuRequest), context.previous_request);
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
     #[test]
-    fn test_artist_request_response() {
+    fn test_artist_dialog_response() {
         let dialog = fixtures::artist_dialog();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
         let mut context = ClientState::new(SharedState::new());
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::ArtistRequest), context.previous_request);
-    }
-
-    #[test]
-    fn test_rendering_artist_request() {
-        let response = fixtures::render_artist_response();
-        let render_artist_request = fixtures::render_artist_request();
-
-        let mut context = ClientState::new(SharedState::new());
-        context.previous_request = Some(DBRequestType::ArtistRequest);
-
-        let request_handler = RequestHandler::new(
-            Box::new(RenderController {}),
-            DBMessage::parse(&render_artist_request).unwrap().1,
-            &mut context,
-        );
-
-        assert_eq!(response, request_handler.respond_to());
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
     #[test]
@@ -1035,7 +1173,6 @@ mod test {
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::AlbumByArtistRequest), context.previous_request);
-
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
@@ -1047,7 +1184,17 @@ mod test {
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
+        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
+    }
 
+    #[test]
+    fn test_title_by_artist_dialog_single_track() {
+        let dialog = fixtures::title_by_artist_album_single_track_dialog();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
+        assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
@@ -1071,6 +1218,15 @@ mod test {
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MountInfoRequest), context.previous_request);
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
+    }
+
+    #[test]
+    fn test_preview_waveform_request() {
+        let dialog = fixtures::preview_waveform_request();
+        let mut context = ClientState::new(SharedState::new());
+        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+
+        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
     }
 
     #[test]

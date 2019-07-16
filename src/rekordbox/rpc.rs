@@ -60,9 +60,9 @@ fn rpc_procedure_export(
 
                     // Directory section
                     // Length
-                    payload.extend(vec![0x00, 0x00, 0x00, 0x02]);
+                    payload.extend(vec![0x00, 0x00, 0x00, 0x06]);
                     // Contents
-                    payload.extend(vec![0x2f, 0x00]); // "/"
+                    payload.extend(vec![0x2f, 0x00, 0x43, 0x00, 0x2f, 0x00]); // "/ C /"
                     // fill bytes
                     payload.extend(OPAQUE_DATA.to_vec());
 

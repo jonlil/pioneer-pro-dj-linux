@@ -6,6 +6,28 @@ use super::db_field::{DBField, DBFieldType, Binary};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
 
+type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
+type DBMessageU32<'a> = IResult<&'a [u8], u32>;
+pub type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
+
+#[derive(Debug, PartialEq)]
+pub struct ManyDBMessages(Vec<DBMessage>);
+
+impl ManyDBMessages {
+    pub fn new(messages: Vec<DBMessage>) -> ManyDBMessages {
+        ManyDBMessages(messages)
+    }
+}
+
+impl IntoIterator for ManyDBMessages {
+    type Item = DBMessage;
+    type IntoIter = ::std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum Error {
     ParseError,
@@ -17,10 +39,6 @@ pub struct DBMessage {
     pub request_type: DBRequestType,
     pub arguments: ArgumentCollection,
 }
-
-type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
-type DBMessageU32<'a> = IResult<&'a [u8], u32>;
-pub type DBMessageResultType<'a, T> = IResult<&'a [u8], T>;
 
 impl DBMessage {
     const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
@@ -105,10 +123,20 @@ impl From<DBMessage> for Bytes {
     }
 }
 
+impl From<ManyDBMessages> for Bytes {
+    fn from(messages: ManyDBMessages) -> Bytes {
+        Bytes::from(messages.into_iter().fold(BytesMut::new(), |mut acc, message| {
+            acc.extend(Bytes::from(message));
+            acc
+        }))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use super::super::fixtures;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn extract_magic_from_db_message() {
@@ -196,7 +224,7 @@ mod test {
                     DBField::from([0x00, 0xff, 0xff, 0xff]),
                 ]),
             })),
-            fixtures::root_menu_request(),
+            DBMessage::parse(&fixtures::root_menu_dialog().0),
         );
     }
 
@@ -221,58 +249,60 @@ mod test {
         );
     }
 
-    #[cfg(test)]
-    mod db_message_parsing {
-        use super::*;
+    #[test]
+    fn test_binary_parsing() {
+        let mut message = vec![
+            0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
+            0x00, 0x1e, 0x10, 0x20, 0x04, 0x0f, 0x01, 0x14,
+            0x00, 0x00, 0x00, 0x0c, 0x03, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let binary_data = vec![
+            0x00, 0x00, 0x00, 0x38, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+            0xe8, 0x03, 0x9b, 0x2a, 0x01, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
 
-        #[test]
-        fn construct_menu_footer() {
-            assert_eq!(
-                DBMessage::parse(&fixtures::raw_menu_footer_request()).unwrap().1,
-                DBMessage::new(
-                    DBField::from([0x05, 0x80, 0x00, 0x0f]),
-                    DBRequestType::MenuFooter,
-                    ArgumentCollection::new(vec![]),
-                ),
-            );
-        }
+        message.extend(binary_data.clone());
 
-        #[test]
-        fn menu_footer_to_bytes() {
-            assert_eq!(
-                fixtures::raw_menu_footer_request(),
-                Bytes::from(DBMessage::parse(&fixtures::raw_menu_footer_request()).unwrap().1),
-            );
-        }
+        assert_eq!(
+            Ok((&[][..], DBMessage::new(
+                DBField::from([0x05, 0x80, 0x00, 0x1e]),
+                DBRequestType::PreviewWaveformRequest,
+                ArgumentCollection::new(vec![
+                    DBField::from(Binary::new(Bytes::from(&binary_data[4..]))),
+                ]),
+            ))),
+            DBMessage::parse(&message),
+        );
+    }
 
-        #[test]
-        fn test_binary_parsing() {
-            let mut message = vec![
-                0x11, 0x87, 0x23, 0x49, 0xae, 0x11, 0x05, 0x80,
-                0x00, 0x1e, 0x10, 0x20, 0x04, 0x0f, 0x01, 0x14,
-                0x00, 0x00, 0x00, 0x0c, 0x03, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            ];
-            let binary_data = vec![
-                0x00, 0x00, 0x00, 0x38, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-                0xe8, 0x03, 0x9b, 0x2a, 0x01, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00,
-            ];
+    #[test]
+    fn parse_packet_with_missing_binary_argument() {
+        let data = vec![
+            0x11, 0x87, 0x23, 0x49, 0xae,
+            0x11, 0x05, 0x80, 0x00, 0x51,
+            0x10, 0x20, 0x04,
+            0x0f, 0x05, 0x14, 0x00, 0x00, 0x00, 0x0c,
+            0x06, 0x06, 0x06, 0x06, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x11, 0x01, 0x08, 0x04, 0x01,
+            0x11, 0x00, 0x00, 0x00, 0x04,
+            0x11, 0x00, 0x00, 0x00, 0x05,
+            0x11, 0x00, 0x00, 0x00, 0x00
+        ];
 
-            message.extend(binary_data.clone());
-
-            assert_eq!(
-                Ok((&[][..], DBMessage::new(
-                    DBField::from([0x05, 0x80, 0x00, 0x1e]),
-                    DBRequestType::PreviewWaveformRequest,
-                    ArgumentCollection::new(vec![
-                        DBField::from(Binary::new(Bytes::from(&binary_data[4..]))),
-                    ]),
-                ))),
-                DBMessage::parse(&message),
-            );
-        }
+        assert_eq!(Ok((&[][..], DBMessage::new(
+            DBField::from([0x05, 0x80, 0x00, 0x51]),
+            DBRequestType::PreviewWaveformRequest,
+            ArgumentCollection::new(vec![
+                DBField::from([0x01, 0x08, 0x04, 0x01]),
+                DBField::from([0x00, 0x00, 0x00, 0x04]),
+                DBField::from([0x00, 0x00, 0x00, 0x05]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from(Binary::new(Bytes::new())),
+            ]),
+        ))), DBMessage::parse(&data));
     }
 }
