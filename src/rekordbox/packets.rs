@@ -19,11 +19,6 @@ impl ManyDBMessages {
     }
 }
 
-struct ManyDBMessagesIterator {
-    items: ManyDBMessages,
-    index: usize,
-}
-
 impl IntoIterator for ManyDBMessages {
     type Item = DBMessage;
     type IntoIter = ::std::vec::IntoIter<Self::Item>;
