@@ -1,6 +1,6 @@
 extern crate rand;
 
-use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
+use std::net::{UdpSocket, ToSocketAddrs, SocketAddr, Ipv4Addr, IpAddr};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
@@ -11,7 +11,6 @@ use rand::Rng;
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
-use super::rpc::EventHandler as RPCEventHandler;
 use crate::rpc::server::{RPCServer};
 use super::library::DBLibraryServer;
 use super::state::{LockedClientState, ClientState};
@@ -125,8 +124,10 @@ impl Client {
     // TODO: Break out this to RPC::Server
     // RPC::Server should have it's own EventLoop
     fn rpc_server_handler(state_ref: LockedClientState) {
+
+        let portmap_server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 50111);
         thread::spawn(move || {
-            let server = RPCServer::new(RPCEventHandler::new(state_ref));
+            let server = RPCServer::new(portmap_server_addr);
 
             // Start RPC server
             server.run();
