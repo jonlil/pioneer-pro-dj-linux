@@ -80,6 +80,22 @@ impl Decode for RpcAuth {
     }
 }
 
+impl From<RpcAuth> for Bytes {
+    fn from(auth: RpcAuth) -> Bytes {
+        let mut buffer = BytesMut::new();
+
+        let rpc_auth = match auth {
+            RpcAuth::Null => 0u32,
+            _             => 16u32,
+        };
+
+        buffer.extend(rpc_auth.to_be_bytes().as_ref());
+        buffer.extend(0u32.to_be_bytes().as_ref());
+
+        Bytes::from(buffer)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct RpcUnixAuth<'a> {
     stamp: u32,
@@ -124,7 +140,8 @@ impl Decode for RpcCall {
 #[derive(Debug, PartialEq)]
 struct RpcReply {
     verifier: RpcAuth,
-    accept_state: RpcState,
+    reply_state: RpcReplyState,
+    accept_state: RpcAcceptState,
     data: RpcReplyMessage,
 }
 
@@ -136,9 +153,28 @@ impl Decode for RpcReply {
     }
 }
 
+impl From<RpcReply> for Bytes {
+    fn from(reply: RpcReply) -> Bytes {
+        let mut buffer = BytesMut::new();
+
+        buffer.extend(Bytes::from(reply.verifier));
+        buffer.extend(Bytes::from(reply.reply_state));
+        buffer.extend(Bytes::from(reply.accept_state));
+        buffer.extend(Bytes::from(reply.data));
+
+        Bytes::from(buffer)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct PortmapGetportReply {
     port: u32,
+}
+
+impl From<PortmapGetportReply> for Bytes {
+    fn from(reply: PortmapGetportReply) -> Bytes {
+        Bytes::from(reply.port.to_be_bytes().as_ref())
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -146,9 +182,42 @@ enum RpcReplyMessage {
     PortmapGetport(PortmapGetportReply),
 }
 
+impl From<RpcReplyMessage> for Bytes {
+    fn from(reply_message: RpcReplyMessage) -> Bytes {
+        Bytes::from(match reply_message {
+            RpcReplyMessage::PortmapGetport(reply) => reply,
+        })
+    }
+}
+
 #[derive(Debug, PartialEq)]
-enum RpcState {
+enum RpcAcceptState {
     Success,
+}
+
+impl From<RpcAcceptState> for Bytes {
+    fn from(state: RpcAcceptState) -> Bytes {
+        let reply_state_value = match state {
+            RpcAcceptState::Success => 0u32,
+        };
+
+        Bytes::from(reply_state_value.to_be_bytes().as_ref())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum RpcReplyState {
+    Accepted,
+}
+
+impl From<RpcReplyState> for Bytes {
+    fn from(state: RpcReplyState) -> Bytes {
+        let reply_state_value = match state {
+            RpcReplyState::Accepted => 0u32,
+        };
+
+        Bytes::from(reply_state_value.to_be_bytes().as_ref())
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -184,6 +253,7 @@ impl From<RpcMessageType> for Bytes {
         match message {
             RpcMessageType::Reply(reply) => {
                 buffer.extend(1u32.to_be_bytes().as_ref());
+                buffer.extend(Bytes::from(reply));
             },
             _ => {},
         };
@@ -470,7 +540,8 @@ mod test {
             xid: 21,
             message: RpcMessageType::Reply(RpcReply {
                 verifier: RpcAuth::Null,
-                accept_state: RpcState::Success,
+                reply_state: RpcReplyState::Accepted,
+                accept_state: RpcAcceptState::Success,
                 data: RpcReplyMessage::PortmapGetport(
                     PortmapGetportReply {
                         port: 36251,
