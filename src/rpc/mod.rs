@@ -1,6 +1,11 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
+extern crate tokio;
+extern crate futures;
+extern crate rand;
+extern crate bytes;
+
 use std::ops::RangeInclusive;
 use crate::rekordbox::util::clone_into_array;
 

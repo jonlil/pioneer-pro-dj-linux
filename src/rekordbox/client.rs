@@ -11,7 +11,7 @@ use rand::Rng;
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
-use crate::rpc::server::{RPCServer};
+use crate::rpc::server::{RpcServer};
 use super::library::DBLibraryServer;
 use super::state::{LockedClientState, ClientState};
 
@@ -127,7 +127,7 @@ impl Client {
 
         let portmap_server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 50111);
         thread::spawn(move || {
-            let server = RPCServer::new(portmap_server_addr);
+            let server = RpcServer::new(portmap_server_addr);
 
             // Start RPC server
             server.run();
