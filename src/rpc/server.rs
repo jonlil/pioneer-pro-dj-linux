@@ -2,7 +2,6 @@ use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 
 use tokio::prelude::*;
 use tokio::net::{UdpFramed, UdpSocket};
-use tokio::codec::BytesCodec;
 use bytes::Bytes;
 use std::convert::TryFrom;
 use rand::Rng;
@@ -10,6 +9,7 @@ use std::io::{Read, Write, self};
 use futures::{Future, Async, Poll};
 
 use super::packets::{RpcMessage, RpcMessageType};
+use super::codec::RpcBytesCodec;
 
 pub struct RpcServer {
     socket_addr: SocketAddr,
@@ -27,29 +27,25 @@ impl RpcServer {
 
     pub fn run(&self) -> Result<(), Box<std::error::Error>> {
         let socket = UdpSocket::bind(&self.socket_addr)?;
-
-        // TODO: Replace this encoding with our own RpcBytesCodec
-        // TODO: Implement RpcBytesCodec
-        let framed = UdpFramed::new(socket, BytesCodec::new());
+        let framed = UdpFramed::new(socket, RpcBytesCodec::new());
         let (_writer, reader) = framed.split();
 
-        let processor = reader.for_each(|(msg, _addr)| {
-            match process(Bytes::from(msg)) {
-                Ok(rpc_message) => {
-                    match rpc_message.message() {
-                        RpcMessageType::Call(_) => {},
-                        _ => panic!("RpcReply not supported here."),
-                    }
+        let processor = reader.for_each(|(rpc_msg, _addr)| {
+            match rpc_msg.message() {
+                RpcMessageType::Call(_) => {
+                    // This port must be coerced into u32 (RPC requirement)
+                    let port: u16 = rand::thread_rng().gen_range(2076, 2200);
+
+                    eprintln!("{:#?}", rpc_msg);
+
+                    allocate_rpc_channel(port);
+                    Ok(())
                 },
-                Err(err) => {},
-            };
-
-            // This port must be coerced into u32 (RPC requirement)
-            let port: u16 = rand::thread_rng().gen_range(2076, 2200);
-
-            allocate_rpc_channel(port);
-
-            Ok(())
+                _ => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "RpcCall is the only supported message type",
+                )),
+            }
         }).map_err(|e| eprintln!("{:?}", e));
 
         tokio::run(processor);

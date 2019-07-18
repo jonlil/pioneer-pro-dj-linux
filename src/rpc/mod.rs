@@ -12,6 +12,7 @@ use crate::rekordbox::util::clone_into_array;
 pub mod server;
 mod pooled_port;
 mod packets;
+mod codec;
 
 #[cfg(test)]
 mod test;

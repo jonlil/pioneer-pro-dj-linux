@@ -384,9 +384,6 @@ impl Decode for PortmapProtocol {
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
         let (input, protocol) = be_u32(input)?;
 
-        eprintln!("{}", protocol);
-
-
         match protocol {
             17u32 => Ok((input, PortmapProtocol::Udp)),
             _ => Err(nom::Err::Error((input, Switch))),
