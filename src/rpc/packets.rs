@@ -22,6 +22,13 @@ pub struct RpcMessage {
 }
 
 impl RpcMessage {
+    pub fn new(transaction_id: u32, message: RpcMessageType) -> RpcMessage {
+        RpcMessage {
+            xid: transaction_id,
+            message: message,
+        }
+    }
+
     fn decode(input: &[u8]) -> IResult<&[u8], RpcMessage> {
         let (input, xid) = be_u32(input)?;
         let (input, message) = RpcMessageType::decode(input)?;
@@ -30,6 +37,10 @@ impl RpcMessage {
             xid: xid,
             message: message,
         }))
+    }
+
+    pub fn transaction_id(self) -> u32 {
+        self.xid
     }
 
     pub fn message(&self) -> &RpcMessageType {
@@ -62,7 +73,7 @@ impl TryFrom<RpcMessage> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
-enum RpcAuth {
+pub enum RpcAuth {
     Null,
     Unix,
     Short,
@@ -101,7 +112,7 @@ impl From<RpcAuth> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
-struct RpcUnixAuth<'a> {
+pub struct RpcUnixAuth<'a> {
     stamp: u32,
     machine_name: &'a str,
     uid: u32,
@@ -143,10 +154,10 @@ impl Decode for RpcCall {
 
 #[derive(Debug, PartialEq)]
 pub struct RpcReply {
-    verifier: RpcAuth,
-    reply_state: RpcReplyState,
-    accept_state: RpcAcceptState,
-    data: RpcReplyMessage,
+    pub verifier: RpcAuth,
+    pub reply_state: RpcReplyState,
+    pub accept_state: RpcAcceptState,
+    pub data: RpcReplyMessage,
 }
 
 impl Decode for RpcReply {
@@ -171,8 +182,8 @@ impl From<RpcReply> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
-struct PortmapGetportReply {
-    port: u32,
+pub struct PortmapGetportReply {
+    pub port: u32,
 }
 
 impl From<PortmapGetportReply> for Bytes {
@@ -182,7 +193,7 @@ impl From<PortmapGetportReply> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
-enum RpcReplyMessage {
+pub enum RpcReplyMessage {
     PortmapGetport(PortmapGetportReply),
 }
 
@@ -195,7 +206,7 @@ impl From<RpcReplyMessage> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
-enum RpcAcceptState {
+pub enum RpcAcceptState {
     Success,
 }
 
@@ -210,7 +221,7 @@ impl From<RpcAcceptState> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
-enum RpcReplyState {
+pub enum RpcReplyState {
     Accepted,
 }
 
