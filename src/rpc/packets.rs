@@ -491,7 +491,6 @@ impl Decode for RpcCredentials {
 #[cfg(test)]
 mod test {
     use super::*;
-    use super::super::RPC;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
 

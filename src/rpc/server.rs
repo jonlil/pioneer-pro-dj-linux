@@ -1,12 +1,10 @@
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
-
-use tokio::prelude::*;
-use tokio::net::{UdpFramed, UdpSocket};
-use std::io::{Read, Write, self};
-use futures::{Future, Async, Poll};
 use std::io::{Error, ErrorKind};
 use std::thread;
-
+use std::io::{Read, Write, self};
+use tokio::prelude::*;
+use tokio::net::{UdpFramed, UdpSocket};
+use futures::{Future, Async, Poll};
 use super::packets::{
     RpcMessage,
     RpcMessageType,
@@ -19,6 +17,7 @@ use super::packets::{
 };
 use super::codec::RpcBytesCodec;
 
+/// Make this server handle generic program handlers.
 fn rpc_program_server() -> Result<u16, Box<std::error::Error>> {
     // let the OS manage port assignment
     let socket = UdpSocket::bind(&get_ipv4_socket_addr(0))?;
