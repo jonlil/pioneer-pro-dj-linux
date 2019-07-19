@@ -2,7 +2,6 @@ use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 
 use tokio::prelude::*;
 use tokio::net::{UdpFramed, UdpSocket};
-use rand::Rng;
 use std::io::{Read, Write, self};
 use futures::{Future, Async, Poll};
 use std::io::{Error, ErrorKind};
@@ -20,8 +19,10 @@ use super::packets::{
 };
 use super::codec::RpcBytesCodec;
 
-fn rpc_program_server(socket_addr: SocketAddr) -> Result<(), Box<std::error::Error>> {
-    let socket = UdpSocket::bind(&socket_addr)?;
+fn rpc_program_server() -> Result<u16, Box<std::error::Error>> {
+    // let the OS manage port assignment
+    let socket = UdpSocket::bind(&get_ipv4_socket_addr(0))?;
+    let local_addr = socket.local_addr()?;
 
     thread::spawn(move || {
         let framed = UdpFramed::new(socket, RpcBytesCodec::new());
@@ -35,7 +36,7 @@ fn rpc_program_server(socket_addr: SocketAddr) -> Result<(), Box<std::error::Err
         tokio::run(program.map_err(|e| eprintln!("{:?}", e)));
     });
 
-    Ok(())
+    Ok(local_addr.port())
 }
 
 pub struct RpcServer {
@@ -59,7 +60,7 @@ impl RpcServer {
 
         let rpc_port_allocator = stream.and_then(|(rpc_msg, peer)| {
             // Move this logic into AllocateRpcChannelHandler
-            allocate_rpc_channel().map(move |port| {
+            AllocateRpcChannelHandler.map(move |port| {
                 (
                     RpcMessage::new(
                         rpc_msg.transaction_id(),
@@ -89,25 +90,14 @@ impl RpcServer {
     }
 }
 
-fn allocate_rpc_channel() -> AllocateRpcChannelHandler {
-    let port: u16 = rand::thread_rng().gen_range(2076, 2200);
-
-    AllocateRpcChannelHandler {
-        port,
-    }
-}
-
-struct AllocateRpcChannelHandler {
-    port: u16,
-}
-
+struct AllocateRpcChannelHandler;
 impl Future for AllocateRpcChannelHandler {
     type Item = u16;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match rpc_program_server(get_ipv4_socket_addr(self.port)) {
-            Ok(_) => Ok(Async::Ready(self.port)),
+        match rpc_program_server() {
+            Ok(port) => Ok(Async::Ready(port)),
             Err(_) => Err(Error::new(ErrorKind::AddrInUse, "failed allocating port")),
         }
     }
