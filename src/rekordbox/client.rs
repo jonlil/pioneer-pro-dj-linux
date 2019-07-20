@@ -72,9 +72,6 @@ impl Client {
     fn broadcast_sender_handler(state_ref: LockedClientState) -> JoinHandle<Event> {
         thread::spawn(move || {
             loop {
-                // TODO: evaluate if the this is required to read fresh data.
-                //       Otherwise it would be a good idea to move the read
-                //       call outside of the loop scope.
                 if let Ok(state) = state_ref.read() {
                     if let Some(address) = &state.address() {
                         random_broadcast_socket(

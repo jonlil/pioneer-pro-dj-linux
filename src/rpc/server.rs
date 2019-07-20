@@ -6,6 +6,7 @@ use tokio::prelude::*;
 use tokio::net::{UdpFramed, UdpSocket};
 use futures::{Future, Async, Poll};
 use super::packets::{
+    ExportListEntry,
     RpcMessage,
     RpcMessageType,
     RpcAuth,
@@ -13,7 +14,8 @@ use super::packets::{
     RpcReply,
     RpcAcceptState,
     RpcReplyMessage,
-    PortmapGetportReply
+    PortmapGetportReply,
+    MountExportReply,
 };
 use super::codec::RpcBytesCodec;
 
@@ -27,12 +29,36 @@ fn rpc_program_server() -> Result<u16, Box<std::error::Error>> {
         let framed = UdpFramed::new(socket, RpcBytesCodec::new());
         let (sink, stream) = framed.split();
 
-        let program = stream.for_each(|(rpc_msg, _peer)| {
-            eprintln!("{:#?}", rpc_msg);
-            Ok(())
+        let event_processor = stream.map(|(rpc_msg, peer)| {
+            let reply = RpcMessage::new(
+                rpc_msg.transaction_id(),
+                RpcMessageType::Reply(RpcReply {
+                    verifier: RpcAuth::Null,
+                    reply_state: RpcReplyState::Accepted,
+                    accept_state: RpcAcceptState::Success,
+                    data: RpcReplyMessage::MountExport(
+                        MountExportReply {
+                            export_list_entries: vec![
+                                ExportListEntry::new(
+                                    String::from("/C/"),
+                                    vec![
+                                        String::from("192.168.10.5/255.255.255.0"),
+                                    ],
+                                ),
+                            ],
+                        },
+                    ),
+                }),
+            );
+
+            (reply, peer)
         });
 
-        tokio::run(program.map_err(|e| eprintln!("{:?}", e)));
+        tokio::run(sink
+            .send_all(event_processor)
+            .map(|_| ())
+            .map_err(|e| eprintln!("{:?}", e))
+        );
     });
 
     Ok(local_addr.port())

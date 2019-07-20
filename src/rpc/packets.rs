@@ -2,11 +2,11 @@ use nom::bytes::complete::{tag, take};
 use nom::number::complete::{be_u32};
 use nom::IResult;
 use nom::error::ErrorKind::Switch;
-use bytes::{BytesMut, Bytes};
+use bytes::{BytesMut, Bytes, BufMut};
 use std::convert::TryFrom;
 
 #[derive(Debug, PartialEq)]
-pub enum DecodeError {
+pub enum Error {
     UnhandledMessageType,
 }
 
@@ -53,14 +53,17 @@ impl TryFrom<Bytes> for RpcMessage {
 
     fn try_from(message: Bytes) -> Result<Self, Self::Error> {
         match RpcMessage::decode(&message) {
-            Ok((input, message)) => Ok(message),
-            _ => Err("Failed decoding Bytes into RpcMessage"),
+            Ok((_input, message)) => Ok(message),
+            _ => {
+                eprintln!("{:?}", message);
+                Err("Failed decoding Bytes into RpcMessage")
+            },
         }
     }
 }
 
 impl TryFrom<RpcMessage> for Bytes {
-    type Error = DecodeError;
+    type Error = Error;
 
     fn try_from(message: RpcMessage) -> Result<Bytes, Self::Error> {
         let mut buffer: BytesMut = BytesMut::new();
@@ -182,6 +185,21 @@ impl From<RpcReply> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum RpcReplyMessage {
+    PortmapGetport(PortmapGetportReply),
+    MountExport(MountExportReply),
+}
+
+impl From<RpcReplyMessage> for Bytes {
+    fn from(reply_message: RpcReplyMessage) -> Bytes {
+        match reply_message {
+            RpcReplyMessage::PortmapGetport(reply) => Bytes::from(reply),
+            RpcReplyMessage::MountExport(reply)    => Bytes::from(reply),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct PortmapGetportReply {
     pub port: u32,
 }
@@ -192,16 +210,73 @@ impl From<PortmapGetportReply> for Bytes {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum RpcReplyMessage {
-    PortmapGetport(PortmapGetportReply),
+
+impl From<ExportListEntry> for Bytes {
+    fn from(entry: ExportListEntry) -> Bytes {
+        let mut buf = BytesMut::new();
+
+        let content = entry.directory.encode_utf16()
+            .into_iter()
+            .flat_map(|item| { item.to_le_bytes().to_vec() })
+            .collect::<Bytes>();
+        buf.put((content.len() as u32).to_be_bytes().to_vec());
+        buf.put(content);
+        buf.put(OPAQUE_DATA.to_vec());
+
+        if entry.groups.len() > 0 {
+            buf.put(VALUE_FOLLOWS.to_vec());
+
+            for group in entry.groups {
+                buf.extend((group.len() as u32).to_be_bytes().to_vec());
+                buf.extend(group.as_bytes());
+                buf.extend(OPAQUE_DATA.to_vec());
+            }
+        }
+
+        buf.extend(NO_VALUE_FOLLOWS.to_vec());
+
+        Bytes::from(buf)
+    }
 }
 
-impl From<RpcReplyMessage> for Bytes {
-    fn from(reply_message: RpcReplyMessage) -> Bytes {
-        Bytes::from(match reply_message {
-            RpcReplyMessage::PortmapGetport(reply) => reply,
-        })
+#[derive(Debug, PartialEq)]
+pub struct MountExportReply {
+    pub export_list_entries: Vec<ExportListEntry>,
+}
+
+const VALUE_FOLLOWS: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
+const NO_VALUE_FOLLOWS: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
+const OPAQUE_DATA: [u8; 2] = [0x00, 0x00];
+
+impl From<MountExportReply> for Bytes {
+    fn from(reply: MountExportReply) -> Bytes {
+        let mut buf = BytesMut::new();
+
+        if reply.export_list_entries.len() > 0 {
+            buf.extend(VALUE_FOLLOWS.to_vec());
+
+            for entry in reply.export_list_entries {
+                buf.extend(Bytes::from(entry));
+            }
+        }
+
+        buf.extend(NO_VALUE_FOLLOWS.to_vec());
+        Bytes::from(buf)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ExportListEntry {
+    directory: String,
+    groups: Vec<String>,
+}
+
+impl ExportListEntry {
+    pub fn new(directory: String, groups: Vec<String>) -> ExportListEntry {
+        ExportListEntry {
+            directory,
+            groups,
+        }
     }
 }
 
@@ -336,6 +411,7 @@ enum RpcProcedure {
     PortmapDump,
     PortmapCallResult,
     NfsNull,
+    MountExport,
     MountNull,
 }
 
@@ -351,9 +427,10 @@ impl RpcProcedure {
             },
             (RpcProgram::Portmap, 4u32) => Ok((input, RpcProcedure::PortmapDump)),
             (RpcProgram::Portmap, 5u32) => Ok((input, RpcProcedure::PortmapCallResult)),
-            (RpcProgram::Portmap, _) => Err(nom::Err::Error((input, Switch))),
-            (RpcProgram::Nfs, _) => Err(nom::Err::Error((input, Switch))),
-            (RpcProgram::Mount, _) => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Portmap, _)    => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Nfs, _)        => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Mount, 5u32)   => Ok((input, RpcProcedure::MountExport)),
+            (RpcProgram::Mount, _)      => Err(nom::Err::Error((input, Switch))),
         }
     }
 }
@@ -560,5 +637,72 @@ mod test {
                 ),
             }),
         }))
+    }
+
+    #[test]
+    fn test_decoding_mount_export_call() {
+        let call = b"\0\0\0\x0c\0\0\0\0\0\0\0\x02\0\x01\x86\xa5\0\0\0\x01\0\0\0\x05\0\0\0\x01\0\0\0\x14\xb0\xb61\x14\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+
+        assert_eq!(
+            Ok((&[][..], RpcMessage {
+                xid: 12u32,
+                message: RpcMessageType::Call(RpcCall {
+                    version: 2,
+                    program: RpcProgram::Mount,
+                    program_version: 1,
+                    procedure: RpcProcedure::MountExport,
+                    credentials: RpcCredentials {
+                        flavor: 1,
+                        length: 20,
+                        stamp: 2964730132,
+                        machine_name: 0u32,
+                        uid: 0u32,
+                        gid: 0u32,
+                        aux_gid: 0u32,
+                    },
+                    verifier: RpcAuth::Null,
+                }),
+            })),
+            RpcMessage::decode(&Bytes::from(call.to_vec())),
+        );
+    }
+
+    /// Test to verify that we can encode RpcReply of type MountExport to bytes
+    #[test]
+    fn test_encoding_mount_export_reply() {
+        let reply = Bytes::from(vec![
+            0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06,
+            0x2f, 0x00, 0x43, 0x00, 0x2f, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1a,
+            0x31, 0x39, 0x32, 0x2e, 0x31, 0x36, 0x38, 0x2e,
+            0x31, 0x30, 0x2e, 0x35, 0x2f, 0x32, 0x35, 0x35,
+            0x2e, 0x32, 0x35, 0x35, 0x2e, 0x32, 0x35, 0x35,
+            0x2e, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ]);
+
+        assert_eq!(Ok(reply), Bytes::try_from(RpcMessage {
+            xid: 22,
+            message: RpcMessageType::Reply(RpcReply {
+                verifier: RpcAuth::Null,
+                reply_state: RpcReplyState::Accepted,
+                accept_state: RpcAcceptState::Success,
+                data: RpcReplyMessage::MountExport(
+                    MountExportReply {
+                        export_list_entries: vec![
+                            ExportListEntry {
+                                directory: String::from("/C/"),
+                                groups: vec![
+                                    String::from("192.168.10.5/255.255.255.0"),
+                                ],
+                            },
+                        ],
+                    },
+                ),
+            }),
+        }));
     }
 }
