@@ -5,7 +5,7 @@ authors = ["Jonas Liljestrand <jonas.liljestrand@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-rand = "0.6"
+rand = "0.7"
 pnet = "0.22.0"
 ipnetwork = "0.14.0"
 byteorder = "1.3.1"
