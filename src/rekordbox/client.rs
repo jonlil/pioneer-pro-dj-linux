@@ -1,12 +1,9 @@
-extern crate rand;
-
 use std::net::{UdpSocket, ToSocketAddrs, SocketAddr, Ipv4Addr, IpAddr};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
 use std::io::ErrorKind;
 use std::time::Duration;
-use rand::Rng;
 
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
@@ -260,8 +257,7 @@ fn send_data<A: ToSocketAddrs>(
 }
 
 fn random_broadcast_socket(address: &PioneerNetwork, data: Message::RekordboxMessageType) {
-    let port = rand::thread_rng().gen_range(45000, 55000);
-    let socket = UdpSocket::bind((address.ip(), port)).unwrap();
+    let socket = UdpSocket::bind((address.ip(), 0)).unwrap();
     socket.set_broadcast(true).unwrap();
     send_data(&socket, (address.broadcast(), 50000), data);
 }
