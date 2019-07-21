@@ -1,5 +1,6 @@
 use nom::bytes::complete::{tag, take};
-use nom::number::complete::{be_u32};
+use nom::number::complete::{be_u32, be_u16, le_u16};
+use nom::multi::count;
 use nom::IResult;
 use nom::error::ErrorKind::Switch;
 use bytes::{BytesMut, Bytes, BufMut};
@@ -10,14 +11,14 @@ pub enum Error {
     UnhandledMessageType,
 }
 
-trait Decode {
+trait Decoder {
     type Output;
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output>;
 }
 
 #[derive(Debug, PartialEq)]
 pub struct RpcMessage {
-    xid: u32,
+    pub xid: u32,
     message: RpcMessageType,
 }
 
@@ -83,7 +84,7 @@ pub enum RpcAuth {
     Des,
 }
 
-impl Decode for RpcAuth {
+impl Decoder for RpcAuth {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -133,7 +134,13 @@ pub struct RpcCall {
     verifier: RpcAuth,
 }
 
-impl Decode for RpcCall {
+impl RpcCall {
+    pub fn procedure(&self) -> &RpcProcedure {
+        &self.procedure
+    }
+}
+
+impl Decoder for RpcCall {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -163,7 +170,7 @@ pub struct RpcReply {
     pub data: RpcReplyMessage,
 }
 
-impl Decode for RpcReply {
+impl Decoder for RpcReply {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -188,6 +195,7 @@ impl From<RpcReply> for Bytes {
 pub enum RpcReplyMessage {
     PortmapGetport(PortmapGetportReply),
     MountExport(MountExportReply),
+    MountMnt(MountMntReply),
 }
 
 impl From<RpcReplyMessage> for Bytes {
@@ -195,6 +203,7 @@ impl From<RpcReplyMessage> for Bytes {
         match reply_message {
             RpcReplyMessage::PortmapGetport(reply) => Bytes::from(reply),
             RpcReplyMessage::MountExport(reply)    => Bytes::from(reply),
+            RpcReplyMessage::MountMnt(reply)       => Bytes::from(reply),
         }
     }
 }
@@ -281,6 +290,32 @@ impl ExportListEntry {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct MountMntReply {
+    status: u32,
+    fhandle: [u8; 32],
+}
+
+impl MountMntReply {
+    pub fn new(status: u32, fhandle: [u8; 32]) -> MountMntReply {
+        MountMntReply {
+            status,
+            fhandle,
+        }
+    }
+}
+
+impl From<MountMntReply> for Bytes {
+    fn from(reply: MountMntReply) -> Bytes {
+        let mut buf = BytesMut::new();
+
+        buf.extend(reply.status.to_be_bytes().to_vec());
+        buf.extend(reply.fhandle.to_vec());
+
+        Bytes::from(buf)
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum RpcAcceptState {
     Success,
 }
@@ -316,7 +351,7 @@ pub enum RpcMessageType {
     Reply(RpcReply),
 }
 
-impl Decode for RpcMessageType {
+impl Decoder for RpcMessageType {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -359,7 +394,7 @@ enum RpcProgram {
     Mount,
 }
 
-impl Decode for RpcProgram {
+impl Decoder for RpcProgram {
     type Output = (RpcProgram, u32);
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -385,7 +420,7 @@ enum PortmapProcedure {
   CallResult,
 }
 
-impl Decode for PortmapProcedure {
+impl Decoder for PortmapProcedure {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -403,7 +438,7 @@ impl Decode for PortmapProcedure {
 }
 
 #[derive(Debug, PartialEq)]
-enum RpcProcedure {
+pub enum RpcProcedure {
     PortmapNull,
     PortmapSet,
     PortmapUnset,
@@ -411,6 +446,7 @@ enum RpcProcedure {
     PortmapDump,
     PortmapCallResult,
     NfsNull,
+    MountMnt(MountMnt),
     MountExport,
     MountNull,
 }
@@ -430,20 +466,51 @@ impl RpcProcedure {
             (RpcProgram::Portmap, _)    => Err(nom::Err::Error((input, Switch))),
             (RpcProgram::Nfs, _)        => Err(nom::Err::Error((input, Switch))),
             (RpcProgram::Mount, 5u32)   => Ok((input, RpcProcedure::MountExport)),
+            (RpcProgram::Mount, 1u32)   => {
+                let (input, data) = MountMnt::decode(&input)?;
+                Ok((input, RpcProcedure::MountMnt(data)))
+            },
             (RpcProgram::Mount, _)      => Err(nom::Err::Error((input, Switch))),
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
-struct PortmapGetport {
+pub struct MountMnt {
+    paths: Vec<String>,
+}
+
+impl Decoder for MountMnt {
+    type Output = Self;
+
+    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+        let (input, length) = be_u32(input)?;
+        let (input, contents) = count(le_u16, length as usize / 2)(input)?;
+        let (input, _fill_bytes) = be_u16(input)?;
+
+        match String::from_utf16(&contents) {
+            Ok(contents) => {
+                Ok((input, MountMnt {
+                    paths: vec![
+                        contents,
+                    ]
+                }))
+            },
+            // TODO: change this ErrorTag to something relevant.
+            Err(_err) => Err(nom::Err::Error((input, Switch))),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct PortmapGetport {
     version: u32,
     program: RpcProgram,
     protocol: PortmapProtocol,
     port: u32,
 }
 
-impl Decode for PortmapGetport {
+impl Decoder for PortmapGetport {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output>{
@@ -466,7 +533,7 @@ enum PortmapProtocol {
     Udp,
 }
 
-impl Decode for PortmapProtocol {
+impl Decoder for PortmapProtocol {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -501,7 +568,7 @@ enum NfsProcedure {
     Statfs,
 }
 
-impl Decode for NfsProcedure {
+impl Decoder for NfsProcedure {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -541,7 +608,7 @@ struct RpcCredentials {
     aux_gid: u32,
 }
 
-impl Decode for RpcCredentials {
+impl Decoder for RpcCredentials {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
@@ -700,6 +767,67 @@ mod test {
                                 ],
                             },
                         ],
+                    },
+                ),
+            }),
+        }));
+    }
+
+    #[test]
+    fn test_decoding_mount_mnt_call() {
+        let call = b"\0\0\0\x16\0\0\0\0\0\0\0\x02\0\x01\x86\xa5\0\0\0\x01\0\0\0\x01\0\0\0\x01\0\0\0\x14\xb0\x8c\xe1\x04\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x06/\0C\0/\0\0\x11";
+
+        assert_eq!(
+            Ok((&[][..], RpcMessage {
+                xid: 22u32,
+                message: RpcMessageType::Call(RpcCall {
+                    version: 2,
+                    program: RpcProgram::Mount,
+                    program_version: 1,
+                    procedure: RpcProcedure::MountMnt(
+                        MountMnt {
+                            paths: vec![String::from("/C/")],
+                        },
+                    ),
+                    credentials: RpcCredentials {
+                        flavor: 1,
+                        length: 20,
+                        stamp: 2962022660,
+                        machine_name: 0u32,
+                        uid: 0u32,
+                        gid: 0u32,
+                        aux_gid: 0u32,
+                    },
+                    verifier: RpcAuth::Null,
+                }),
+            })),
+            RpcMessage::decode(&Bytes::from(call.to_vec())),
+        );
+    }
+
+    #[test]
+    fn test_encoding_mount_mnt_reply() {
+        let reply = Bytes::from(vec![
+            0x00, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00
+        ]);
+
+        assert_eq!(Ok(reply), Bytes::try_from(RpcMessage {
+            xid: 25,
+            message: RpcMessageType::Reply(RpcReply {
+                verifier: RpcAuth::Null,
+                reply_state: RpcReplyState::Accepted,
+                accept_state: RpcAcceptState::Success,
+                data: RpcReplyMessage::MountMnt(
+                    MountMntReply {
+                        status: 0,
+                        fhandle: [0x00; 32],
                     },
                 ),
             }),
