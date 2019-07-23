@@ -9,29 +9,15 @@ use super::packets::*;
 use super::codec::RpcBytesCodec;
 use super::events::EventHandler;
 
-fn mount_mnt_rpc_callback(call: &RpcCall, data: &MountMnt) -> MountMntReply {
-    MountMntReply::new(0, [0x00; 32])
-}
-
-fn mount_export_rpc_callback(_call: &RpcCall) -> MountExportReply {
-    MountExportReply {
-        export_list_entries: vec![
-            ExportListEntry::new(
-                String::from("/C/"),
-                vec![
-                    String::from("192.168.10.5/255.255.255.0"),
-                ],
-            ),
-        ],
-    }
-}
-
-struct RpcProcedureRouter {
+struct RpcProcedureRouter<T>
+    where T: EventHandler,
+{
     request: RpcMessage,
     peer: SocketAddr,
+    handler: Arc<T>,
 }
 
-impl Future for RpcProcedureRouter {
+impl<T: EventHandler> Future for RpcProcedureRouter <T>{
     type Item = (RpcMessage, SocketAddr);
     type Error = io::Error;
 
@@ -40,27 +26,23 @@ impl Future for RpcProcedureRouter {
 
         match self.request.message() {
             RpcMessageType::Call(call) => {
-                let reply = match call.procedure() {
-                    // TODO: Create program specific enums (excluding portmap.)
-                    // We don't want to handle portmap related code here.
-                    RpcProcedure::MountExport => RpcReplyMessage::MountExport(mount_export_rpc_callback(call)),
-                    RpcProcedure::MountMnt(data) => RpcReplyMessage::MountMnt(mount_mnt_rpc_callback(call, data)),
-                    // TODO: Change ErrorKind to something that makes sense
-                    _ => panic!("should map to some RPC Error."),
-                };
-
                 Ok(Async::Ready((
-                    RpcMessage::new(
-                        *transaction_id,
-                        RpcMessageType::Reply(RpcReply {
-                            verifier: RpcAuth::Null,
-                            reply_state: RpcReplyState::Accepted,
-                            accept_state: RpcAcceptState::Success,
-                            data: reply,
-                        })
-                    ),
-                    self.peer,
-                )))
+                    match self.handler.handle_event(call) {
+                        Ok(reply) => {
+                            RpcMessage::new(
+                                *transaction_id,
+                                RpcMessageType::Reply(RpcReply {
+                                    verifier: RpcAuth::Null,
+                                    reply_state: RpcReplyState::Accepted,
+                                    accept_state: RpcAcceptState::Success,
+                                    data: reply,
+                                })
+                            )
+                        },
+                        _ => unimplemented!(),
+                    },
+                    self.peer))
+                )
             },
             RpcMessageType::Reply(_) => panic!("RpcReply not allowed in call processor."),
         }
@@ -68,7 +50,7 @@ impl Future for RpcProcedureRouter {
 }
 
 /// Make this server handle generic program handlers.
-fn rpc_program_server() -> Result<u16, Box<std::error::Error>> {
+fn rpc_program_server<T: EventHandler>(handler: Arc<T>) -> Result<u16, Box<std::error::Error>> {
     // let the OS manage port assignment
     let socket = UdpSocket::bind(&get_ipv4_socket_addr(0))?;
     let local_addr = socket.local_addr()?;
@@ -77,10 +59,11 @@ fn rpc_program_server() -> Result<u16, Box<std::error::Error>> {
         let framed = UdpFramed::new(socket, RpcBytesCodec::new());
         let (sink, stream) = framed.split();
 
-        let event_processor = stream.and_then(|(rpc_msg, peer)| {
+        let event_processor = stream.and_then(move |(rpc_msg, peer)| {
             RpcProcedureRouter {
                 request: rpc_msg,
                 peer: peer,
+                handler: handler.clone(),
             }
         });
 
@@ -94,33 +77,30 @@ fn rpc_program_server() -> Result<u16, Box<std::error::Error>> {
     Ok(local_addr.port())
 }
 
-pub struct RpcServer<T>
-where
-    T: EventHandler,
-{
+pub struct RpcServer {
     socket_addr: SocketAddr,
     clients: Vec<()>,
-    handler: Arc<T>,
 }
 
 /// This is the Portmap server
-impl<T: EventHandler> RpcServer<T> {
-    pub fn new(addr: SocketAddr, handler: T) -> Self {
+impl RpcServer {
+    pub fn new(addr: SocketAddr) -> Self {
         Self {
             socket_addr: addr,
             clients: vec![],
-            handler: Arc::new(handler),
         }
     }
 
-    pub fn run(&self) -> Result<(), Box<std::error::Error>> {
+    pub fn run<T: EventHandler>(&self, handler: Arc<T>) -> Result<(), Box<std::error::Error>> {
         let socket = UdpSocket::bind(&self.socket_addr)?;
         let framed = UdpFramed::new(socket, RpcBytesCodec::new());
         let (sink, stream) = framed.split();
 
-        let rpc_port_allocator = stream.and_then(|(rpc_msg, peer)| {
+        let rpc_port_allocator = stream.and_then(move |(rpc_msg, peer)| {
             // Move this logic into AllocateRpcChannelHandler
-            AllocateRpcChannelHandler.map(move |port| {
+            AllocateRpcChannelHandler {
+                handler: handler.clone(),
+            }.map(move |port| {
                 (
                     RpcMessage::new(
                         rpc_msg.transaction_id(),
@@ -150,13 +130,18 @@ impl<T: EventHandler> RpcServer<T> {
     }
 }
 
-struct AllocateRpcChannelHandler;
-impl Future for AllocateRpcChannelHandler {
+struct AllocateRpcChannelHandler<T>
+    where T: EventHandler,
+{
+    handler: Arc<T>,
+}
+
+impl<T: EventHandler> Future for AllocateRpcChannelHandler<T> {
     type Item = u16;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match rpc_program_server() {
+        match rpc_program_server(self.handler.clone()) {
             Ok(port) => Ok(Async::Ready(port)),
             Err(_) => Err(Error::new(ErrorKind::AddrInUse, "failed allocating port")),
         }

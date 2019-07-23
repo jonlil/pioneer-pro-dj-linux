@@ -121,10 +121,10 @@ impl Client {
         let event_handler = RpcEventHandler::new(state_ref.clone());
 
         thread::spawn(move || {
-            let server = RpcServer::new(portmap_server_addr, event_handler);
+            let server = RpcServer::new(portmap_server_addr);
 
             // Start RPC server
-            match server.run() {
+            match server.run(Arc::new(event_handler)) {
                 Ok(_) => {},
                 Err(err) => panic!(format!("RpcServerHandler panic: {:?}", err)),
             }

@@ -13,13 +13,14 @@ pub mod events {
     use super::packets::{
         RpcProcedure,
         RpcReplyMessage,
+        RpcCall,
     };
     use std::io::{Error, ErrorKind};
 
     pub trait EventHandler: Send + Sync + 'static {
-        fn on_event(&self) -> Result<RpcReplyMessage, std::io::Error>;
+        fn on_event(&self, procedure: RpcProcedure, call: RpcCall) -> Result<RpcReplyMessage, std::io::Error>;
 
-        fn handle_event(procedure: RpcProcedure) -> Result<RpcReplyMessage, std::io::Error> {
+        fn handle_event(&self, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
             Err(Error::new(ErrorKind::InvalidInput, "failed"))
         }
     }
