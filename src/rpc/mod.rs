@@ -6,5 +6,21 @@ extern crate futures;
 extern crate bytes;
 
 pub mod server;
-mod packets;
+pub mod packets;
 mod codec;
+
+pub mod events {
+    use super::packets::{
+        RpcProcedure,
+        RpcReplyMessage,
+    };
+    use std::io::{Error, ErrorKind};
+
+    pub trait EventHandler: Send + Sync + 'static {
+        fn on_event(&self) -> Result<RpcReplyMessage, std::io::Error>;
+
+        fn handle_event(procedure: RpcProcedure) -> Result<RpcReplyMessage, std::io::Error> {
+            Err(Error::new(ErrorKind::InvalidInput, "failed"))
+        }
+    }
+}

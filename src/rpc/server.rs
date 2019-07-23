@@ -1,12 +1,13 @@
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
-use std::io::{Error, ErrorKind};
+use std::io::{Error, ErrorKind, Read, Write, self};
 use std::thread;
-use std::io::{Read, Write, self};
+use std::sync::Arc;
 use tokio::prelude::*;
 use tokio::net::{UdpFramed, UdpSocket};
 use futures::{Future, Async, Poll};
 use super::packets::*;
 use super::codec::RpcBytesCodec;
+use super::events::EventHandler;
 
 fn mount_mnt_rpc_callback(call: &RpcCall, data: &MountMnt) -> MountMntReply {
     MountMntReply::new(0, [0x00; 32])
@@ -93,17 +94,22 @@ fn rpc_program_server() -> Result<u16, Box<std::error::Error>> {
     Ok(local_addr.port())
 }
 
-pub struct RpcServer {
+pub struct RpcServer<T>
+where
+    T: EventHandler,
+{
     socket_addr: SocketAddr,
     clients: Vec<()>,
+    handler: Arc<T>,
 }
 
 /// This is the Portmap server
-impl RpcServer {
-    pub fn new(addr: SocketAddr) -> Self {
+impl<T: EventHandler> RpcServer<T> {
+    pub fn new(addr: SocketAddr, handler: T) -> Self {
         Self {
             socket_addr: addr,
             clients: vec![],
+            handler: Arc::new(handler),
         }
     }
 
@@ -167,14 +173,12 @@ mod test {
     use std::net::{IpAddr, Ipv4Addr};
 
     /// Create a Rpc mock server that only listens on localhost
-    fn mock_rpc_server() -> RpcServer {
-        RpcServer::new(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50111),
-        )
-    }
+    // fn mock_rpc_server() -> RpcServer<T> {
+    //     RpcServer::new(SocketAddr::new(
+    //         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50111),
+    //     )
+    // }
 
     #[test]
-    fn export_mount_service() {
-
-    }
+    fn export_mount_service() {}
 }

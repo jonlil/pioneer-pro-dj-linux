@@ -9,6 +9,7 @@ use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
 use crate::rpc::server::{RpcServer};
+use super::rpc::EventHandler as RpcEventHandler;
 use super::library::DBLibraryServer;
 use super::state::{LockedClientState, ClientState};
 
@@ -115,16 +116,18 @@ impl Client {
         });
     }
 
-    // TODO: Break out this to RPC::Server
-    // RPC::Server should have it's own EventLoop
     fn rpc_server_handler(state_ref: LockedClientState) {
-
         let portmap_server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 50111);
+        let event_handler = RpcEventHandler::new(state_ref.clone());
+
         thread::spawn(move || {
-            let server = RpcServer::new(portmap_server_addr);
+            let server = RpcServer::new(portmap_server_addr, event_handler);
 
             // Start RPC server
-            server.run();
+            match server.run() {
+                Ok(_) => {},
+                Err(err) => panic!(format!("RpcServerHandler panic: {:?}", err)),
+            }
         });
     }
 
