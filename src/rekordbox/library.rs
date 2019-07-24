@@ -1,4 +1,3 @@
-extern crate tokio_codec;
 extern crate bytes;
 extern crate futures;
 
