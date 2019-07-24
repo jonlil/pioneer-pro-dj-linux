@@ -1,18 +1,15 @@
-extern crate rand;
-
-use std::net::{UdpSocket, ToSocketAddrs, SocketAddr};
+use std::net::{UdpSocket, ToSocketAddrs, SocketAddr, Ipv4Addr, IpAddr};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
 use std::io::ErrorKind;
 use std::time::Duration;
-use rand::Rng;
 
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
-use super::rpc::EventHandler as RPCEventHandler;
-use crate::rpc::server::{RPCServer};
+use crate::rpc::server::{RpcServer};
+use super::rpc::EventHandler as RpcEventHandler;
 use super::library::DBLibraryServer;
 use super::state::{LockedClientState, ClientState};
 
@@ -76,9 +73,6 @@ impl Client {
     fn broadcast_sender_handler(state_ref: LockedClientState) -> JoinHandle<Event> {
         thread::spawn(move || {
             loop {
-                // TODO: evaluate if the this is required to read fresh data.
-                //       Otherwise it would be a good idea to move the read
-                //       call outside of the loop scope.
                 if let Ok(state) = state_ref.read() {
                     if let Some(address) = &state.address() {
                         random_broadcast_socket(
@@ -122,14 +116,18 @@ impl Client {
         });
     }
 
-    // TODO: Break out this to RPC::Server
-    // RPC::Server should have it's own EventLoop
     fn rpc_server_handler(state_ref: LockedClientState) {
+        let portmap_server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 50111);
+        let event_handler = RpcEventHandler::new(state_ref.clone());
+
         thread::spawn(move || {
-            let server = RPCServer::new(RPCEventHandler::new(state_ref));
+            let server = RpcServer::new(portmap_server_addr);
 
             // Start RPC server
-            server.run();
+            match server.run(Arc::new(event_handler)) {
+                Ok(_) => {},
+                Err(err) => panic!(format!("RpcServerHandler panic: {:?}", err)),
+            }
         });
     }
 
@@ -259,8 +257,7 @@ fn send_data<A: ToSocketAddrs>(
 }
 
 fn random_broadcast_socket(address: &PioneerNetwork, data: Message::RekordboxMessageType) {
-    let port = rand::thread_rng().gen_range(45000, 55000);
-    let socket = UdpSocket::bind((address.ip(), port)).unwrap();
+    let socket = UdpSocket::bind((address.ip(), 0)).unwrap();
     socket.set_broadcast(true).unwrap();
     send_data(&socket, (address.broadcast(), 50000), data);
 }

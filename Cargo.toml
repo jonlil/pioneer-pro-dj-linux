@@ -5,15 +5,12 @@ authors = ["Jonas Liljestrand <jonas.liljestrand@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-rand = "0.7"
 pnet = "0.22.0"
 ipnetwork = "0.14.0"
 byteorder = "1.3.1"
-parking_lot = "0.9.0"
-tokio = "0.1.18"
-tokio-codec = "0.1.1"
+tokio = "0.1.22"
 bytes = "0.4.12"
-futures = "0.1.26"
+futures = "0.1.28"
 nom = "5.0.0"
 
 [dev-dependencies]

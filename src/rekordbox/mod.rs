@@ -17,7 +17,6 @@ pub mod util;
 
 // Internal mods
 mod message;
-mod rpc;
 mod library;
 mod packets;
 mod state;
@@ -25,6 +24,7 @@ mod db_field;
 mod db_request_type;
 mod db_message_argument;
 mod metadata_type;
+mod rpc;
 
 // tests
 #[cfg(test)]

@@ -1,127 +1,76 @@
-use std::collections::HashMap;
-use crate::rpc::{RPC, self};
+use std::io::{Error, ErrorKind};
+use std::net::IpAddr;
+use crate::rpc::events::EventHandler as RpcEventHandler;
 use super::state::{LockedClientState};
-use std::net::{UdpSocket, SocketAddr, IpAddr};
-use std::io::Error;
+use crate::rpc::packets::*;
 
-type RPCPackage = Vec<u8>;
-type Callback = fn(&UdpSocket, SocketAddr, RPC, &LockedClientState);
+struct Context<'a> {
+    state: &'a LockedClientState,
+    call: RpcCall,
+}
+
+fn mount_mnt_rpc_callback(context: Context, data: MountMnt) -> Result<MountMntReply, std::io::Error> {
+    Ok(MountMntReply::new(0, [0x00; 32]))
+}
+
+fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::io::Error> {
+    if let Ok(state) = context.state.read() {
+        if let Some(address) = state.address() {
+            let address = match (address.ip(), address.mask()) {
+                (IpAddr::V4(ip), IpAddr::V4(mask)) => {
+                    format!("{}/{}", ip, mask)
+                },
+                _ => panic!("IPv6 is not supported"),
+            };
+
+            return Ok(MountExportReply {
+                export_list_entries: vec![
+                    ExportListEntry::new(
+                        String::from("/C/"),
+                        vec![
+                            address,
+                        ],
+                    ),
+                ],
+            })
+        }
+    }
+    Err(Error::new(ErrorKind::InvalidInput, "Duno"))
+}
 
 pub struct EventHandler {
-    callbacks: HashMap<String, Callback>,
     state: LockedClientState,
-    // mpsc
 }
 
 impl EventHandler {
     pub fn new(client_state: LockedClientState) -> Self {
-        let mut handler = EventHandler {
-            callbacks: HashMap::new(),
+        EventHandler {
             state: client_state,
-        };
-
-        handler.add_callback("Export", rpc_procedure_export);
-        handler.add_callback("Mnt", rpc_procedure_mnt);
-
-        handler
-    }
-
-    fn add_callback(&mut self, name: &str, func: Callback) {
-        self.callbacks.insert(name.to_string(), func);
-    }
-}
-
-impl rpc::server::EventHandler for EventHandler {
-    fn on_event(&self, name: &str, socket: &UdpSocket, receiver: SocketAddr, rpc_program: RPC) {
-        if self.callbacks.contains_key(name) {
-            self.callbacks[name](socket, receiver, rpc_program, &self.state);
         }
     }
 }
 
-const OPAQUE_DATA: [u8; 2] = [0x00, 0x00];
-const VALUE_FOLLOWS: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
-const NO_VALUE_FOLLOWS: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
+impl RpcEventHandler for EventHandler {
+    fn on_event(&self, procedure: RpcProcedure, call: RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+        let context = Context {
+            call: call,
+            state: &self.state,
+        };
 
-fn rpc_procedure_export(
-    socket: &UdpSocket,
-    receiver: SocketAddr,
-    rpc_program: RPC,
-    state: &LockedClientState,
-) {
-    // This would be nice to abstract away
-    match rpc_program {
-        RPC::Mount(call, _export) => {
-            if let Ok(state) = state.read() {
-                if let Some(address) = state.address() {
-                    let mut payload: Vec<u8> = vec![];
-
-                    payload.extend(VALUE_FOLLOWS.to_vec());
-
-                    // Directory section
-                    // Length
-                    payload.extend(vec![0x00, 0x00, 0x00, 0x06]);
-                    // Contents
-                    payload.extend(vec![0x2f, 0x00, 0x43, 0x00, 0x2f, 0x00]); // "/ C /"
-                    // fill bytes
-                    payload.extend(OPAQUE_DATA.to_vec());
-
-                    payload.extend(VALUE_FOLLOWS.to_vec());
-                    match (address.ip(), address.mask()) {
-                        (IpAddr::V4(ip), IpAddr::V4(mask)) => {
-                            let group_value: Vec<u8> = format!(
-                                "{}/{}",
-                                ip,
-                                mask,
-                            ).bytes().collect();
-                            payload.extend(vec![0x00, 0x00, 0x00, 0x1a]);
-                            payload.extend(group_value);
-                        },
-                        _ => panic!("IPv6 is not supported"),
-                    }
-                    payload.extend(OPAQUE_DATA.to_vec());
-                    payload.extend(NO_VALUE_FOLLOWS.to_vec());
-                    payload.extend(NO_VALUE_FOLLOWS.to_vec());
-
-                    match send_rpc_reply(&socket, &receiver, call.to_reply(vec![payload])) {
-                        Ok(_) => {},
-                        Err(_) => {},
-                    }
+        match procedure {
+            RpcProcedure::MountExport => {
+                match mount_export_rpc_callback(context) {
+                    Ok(reply) => Ok(RpcReplyMessage::MountExport(reply)),
+                    Err(err) => Err(err),
                 }
-            }
-        },
-        _ => {},
+            },
+            RpcProcedure::MountMnt(data) => {
+                match mount_mnt_rpc_callback(context, data) {
+                    Ok(reply) => Ok(RpcReplyMessage::MountMnt(reply)),
+                    Err(err) => Err(err),
+                }
+            },
+            _ => Err(Error::new(ErrorKind::InvalidInput, "failed")),
+        }
     }
-}
-
-fn rpc_procedure_mnt(
-    socket: &UdpSocket,
-    receiver: SocketAddr,
-    rpc_program: RPC,
-    _state: &LockedClientState,
-) {
-    match rpc_program {
-        RPC::Mount(call, _mnt) => {
-            let mut payload: Vec<u8> = vec![];
-            // Status: ok
-            payload.extend(vec![0x00, 0x00, 0x00, 0x00]);
-            // crc-32 file handle..
-            payload.extend([0u8; 32].to_vec());
-
-            match send_rpc_reply(&socket, &receiver, call.to_reply(vec![payload])) {
-                Ok(_) => {},
-                Err(_) => {},
-            }
-        },
-        _ => panic!("Invalid RPC Routing"),
-    };
-}
-
-
-fn send_rpc_reply(
-    socket: &UdpSocket,
-    receiver: &SocketAddr,
-    reply: Vec<u8>,
-) -> Result<(usize), Error> {
-    socket.send_to(reply.as_ref(), receiver)
 }

@@ -1,18 +1,16 @@
-extern crate tokio_codec;
 extern crate bytes;
 extern crate futures;
-extern crate rand;
 
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Async, Poll};
 use std::net::{SocketAddr, Ipv4Addr, IpAddr};
-use std::io::{Read, Write, self};
+use std::io::{Read, Write, self, Error, ErrorKind};
 use std::thread;
-use rand::Rng;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{read_exact, write_all};
 use tokio::codec::{BytesCodec, Decoder};
 use tokio::prelude::*;
+
 
 use super::packets::DBMessage;
 use super::db_field::{DBField, DBFieldType};
@@ -1014,31 +1012,37 @@ fn process(
 /// Handle library clients
 struct LibraryClientHandler;
 impl LibraryClientHandler {
-    fn spawn(address: SocketAddr, state: LockedSharedState) -> Result<(), io::Error> {
+    fn spawn(address: SocketAddr, state: LockedSharedState) -> Result<u16, io::Error> {
         let listener = TcpListener::bind(&address)?;
-        let done = listener
-            .incoming()
-            .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
-            .for_each(move |socket| {
-                let peer_addr = socket.peer_addr().unwrap();
-                let framed = BytesCodec::new().framed(socket);
-                let (writer, reader) = framed.split();
-                let mut context = ClientState::new(state.clone());
+        let local_addr = listener.local_addr()?;
 
-                let responses = reader.map(move |bytes| {
-                    process(Bytes::from(bytes), &mut context, &peer_addr)
+        thread::spawn(move || {
+            let done = listener
+                .incoming()
+                .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
+                .for_each(move |socket| {
+                    let peer_addr = socket.peer_addr().unwrap();
+                    let framed = BytesCodec::new().framed(socket);
+                    let (writer, reader) = framed.split();
+                    let mut context = ClientState::new(state.clone());
+
+                    let responses = reader.map(move |bytes| {
+                        process(Bytes::from(bytes), &mut context, &peer_addr)
+                    });
+
+                    let writes = responses.fold(writer, |writer, response| {
+                        writer.send(response)
+                    });
+
+                    let processor = writes.then(move |_w| Ok(()));
+
+                    tokio::spawn(processor)
                 });
 
-                let writes = responses.fold(writer, |writer, response| {
-                    writer.send(response)
-                });
+            tokio::run(done);
+        });
 
-                let processor = writes.then(move |_w| Ok(()));
-
-                tokio::spawn(processor)
-            });
-
-        Ok(tokio::run(done))
+        Ok(local_addr.port())
     }
 }
 
@@ -1051,18 +1055,17 @@ impl DBLibraryServer {
             .incoming()
             .map_err(|e| println!("failed to accept socket; error = {:?}", e))
             .for_each(move |socket| {
-                let port: u16 = rand::thread_rng().gen_range(60315, 65315);
                 let state = state.clone();
-                let allocated_port = port.to_be_bytes().to_vec();
 
                 let processor = read_exact(socket, vec![0; 19])
                     .and_then(move |(socket, _bytes)| {
-                        allocate_library_client_handler(port, state)
-                            .then(|_| Ok((socket, allocated_port)))
+                        allocate_library_client_handler(state)
+                            .map(|port| (socket, port))
                     })
-                    .and_then(|(socket, allocated_port)| {
-                        write_all(socket, allocated_port.to_owned()).then(|_| Ok(()))
+                    .map(|(socket, allocated_port)| {
+                        write_all(socket, (allocated_port as u32).to_be_bytes())
                     })
+                    .map(|_| ())
                     .map_err(|err| eprintln!("Failed responding to port: {:?}", err));
                 tokio::spawn(processor)
             });
@@ -1075,34 +1078,29 @@ impl DBLibraryServer {
 }
 
 fn allocate_library_client_handler(
-    port: u16,
     state: LockedSharedState,
 ) -> InitializeClientLibraryHandler {
     InitializeClientLibraryHandler {
-        port: port,
         state: state,
     }
 }
 
 struct InitializeClientLibraryHandler {
-    port: u16,
     state: LockedSharedState,
 }
 
 impl Future for InitializeClientLibraryHandler {
-    type Item = ();
+    type Item = u16;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let port = self.port.to_owned();
         let state = self.state.clone();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0);
 
-        thread::spawn(move || {
-            let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port);
-            LibraryClientHandler::spawn(addr, state).unwrap();
-        });
-
-        Ok(Async::Ready(()))
+        match LibraryClientHandler::spawn(addr, state) {
+            Ok(port) => Ok(Async::Ready(port)),
+            Err(_) => Err(Error::new(ErrorKind::AddrInUse, "failed allocating port")),
+        }
     }
 }
 
