@@ -1,27 +1,45 @@
 use std::io::{Error, ErrorKind};
-use std::net::IpAddr;
 use crate::rpc::events::EventHandler as RpcEventHandler;
-use super::state::{LockedClientState};
+use crate::rpc::PortmapServer;
 use crate::rpc::packets::*;
+use crate::rekordbox::ServerState;
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+use std::sync::{Arc, Mutex};
 
 struct Context<'a> {
-    state: &'a LockedClientState,
-    call: RpcCall,
+    state: &'a Arc<Mutex<ServerState>>,
+    call: &'a RpcCall,
 }
 
-fn mount_mnt_rpc_callback(context: Context, data: MountMnt) -> Result<MountMntReply, std::io::Error> {
+pub async fn server(state_ref: Arc<Mutex<ServerState>>) -> Result<(), std::io::Error> {
+    let portmap_server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 50111);
+    let event_handler = EventHandler::new(state_ref.clone());
+
+    let join = tokio::task::spawn(async move {
+        let server = PortmapServer::new(portmap_server_addr);
+        // Start RPC server
+        dbg!("Starting portmap server");
+        match server.run(Arc::new(event_handler)).await {
+            Ok(_) => {},
+            Err(err) => {
+                panic!(format!("RpcServerHandler panic: {:?}", err));
+            },
+        }
+    });
+
+    join.await?;
+
+    Ok(())
+}
+
+fn mount_mnt_rpc_callback(_context: Context, _data: &MountMnt) -> Result<MountMntReply, std::io::Error> {
     Ok(MountMntReply::new(0, [0x00; 32]))
 }
 
 fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::io::Error> {
-    if let Ok(state) = context.state.read() {
+    if let Ok(state) = context.state.lock() {
         if let Some(address) = state.address() {
-            let address = match (address.ip(), address.mask()) {
-                (IpAddr::V4(ip), IpAddr::V4(mask)) => {
-                    format!("{}/{}", ip, mask)
-                },
-                _ => panic!("IPv6 is not supported"),
-            };
+            let address = format!("{}/{}", address.ip(), address.mask());
 
             return Ok(MountExportReply {
                 export_list_entries: vec![
@@ -39,11 +57,11 @@ fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::
 }
 
 pub struct EventHandler {
-    state: LockedClientState,
+    state: Arc<Mutex<ServerState>>,
 }
 
 impl EventHandler {
-    pub fn new(client_state: LockedClientState) -> Self {
+    pub fn new(client_state: Arc<Mutex<ServerState>>) -> Self {
         EventHandler {
             state: client_state,
         }
@@ -51,7 +69,7 @@ impl EventHandler {
 }
 
 impl RpcEventHandler for EventHandler {
-    fn on_event(&self, procedure: RpcProcedure, call: RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+    fn on_event(&self, procedure: &RpcProcedure, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
         let context = Context {
             call: call,
             state: &self.state,
@@ -70,7 +88,7 @@ impl RpcEventHandler for EventHandler {
                     Err(err) => Err(err),
                 }
             },
-            _ => Err(Error::new(ErrorKind::InvalidInput, "failed")),
+            _ => Err(Error::new(ErrorKind::InvalidInput, "RpcProcedure not implemented")),
         }
     }
 }

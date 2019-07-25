@@ -1,30 +1,29 @@
-extern crate pnet;
-extern crate ipnetwork;
+#![allow(dead_code)]
 
 use pnet::datalink::{NetworkInterface, MacAddr, interfaces};
-use ipnetwork::{IpNetwork};
-use std::net::IpAddr;
+use ipnetwork::{Ipv4Network};
+use std::net::{Ipv4Addr, IpAddr, SocketAddr};
 
 #[derive(Debug, PartialEq)]
 pub struct PioneerNetwork {
-    network: IpNetwork,
+    network: Ipv4Network,
     mac: MacAddr,
 }
 
 impl PioneerNetwork {
-    pub fn new(network: IpNetwork, mac: MacAddr) -> Self {
+    pub fn new(network: Ipv4Network, mac: MacAddr) -> Self {
         Self { network: network, mac: mac }
     }
 
-    pub fn contains(&self, ip: IpAddr) -> bool {
+    pub fn contains(&self, ip: Ipv4Addr) -> bool {
         self.network.contains(ip)
     }
 
-    pub fn ip(&self) -> IpAddr {
+    pub fn ip(&self) -> Ipv4Addr {
         self.network.ip()
     }
 
-    pub fn mask(&self) -> IpAddr {
+    pub fn mask(&self) -> Ipv4Addr {
         self.network.mask()
     }
 
@@ -32,22 +31,36 @@ impl PioneerNetwork {
         self.mac
     }
 
-    pub fn broadcast(&self) -> IpAddr {
+    pub fn broadcast(&self) -> Ipv4Addr {
         self.network.broadcast()
     }
 }
 
-pub fn find_interface(address: IpAddr) -> Option<PioneerNetwork> {
-    match_interface(interfaces(), address)
+pub fn find_interface(address: &Ipv4Addr) -> Option<PioneerNetwork> {
+    match_interface(interfaces(), &address)
 }
 
-fn match_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<PioneerNetwork> {
+fn match_interface(ifaces: Vec<NetworkInterface>, address: &Ipv4Addr) -> Option<PioneerNetwork> {
     ifaces.iter()
-        .flat_map(|iface| iface.ips.iter().map(move |ip| PioneerNetwork::new(
-            *ip,
-            iface.mac.unwrap(),
-        )))
-        .find(|network: &PioneerNetwork| network.contains(address))
+        .flat_map(|iface| {
+            iface.ips.iter()
+                .filter_map(move |ip| {
+                    match ip {
+                        ipnetwork::IpNetwork::V4(ip) => {
+                            Some(PioneerNetwork::new(
+                                *ip,
+                                iface.mac.unwrap(),
+                            ))
+                        },
+                        _ => None,
+                    }
+                })
+        })
+        .find(|network: &PioneerNetwork| network.contains(*address))
+}
+
+pub fn random_ipv4_socket_address() -> SocketAddr {
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0)
 }
 
 #[cfg(test)]
@@ -121,11 +134,10 @@ mod tests {
 
     #[test]
     fn it_finds_local_address_based_on_remote_address() {
-        let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 10, 52));
-        let local_network_address = IpNetwork::V4(Ipv4Network::new(
-                Ipv4Addr::new(192, 168, 10, 50), 24).unwrap());
+        let remote_address = Ipv4Addr::new(192, 168, 10, 52);
+        let local_network_address = Ipv4Network::new(Ipv4Addr::new(192, 168, 10, 50), 24).unwrap();
 
-        let network = match_interface(interfaces(), remote_address);
+        let network = match_interface(interfaces(), &remote_address);
 
         assert_eq!(network.is_none(), false);
         assert_eq!(network, Some(PioneerNetwork {
@@ -136,17 +148,17 @@ mod tests {
 
     #[test]
     fn it_find_network_in_a_smaller_cidr() {
-        let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 230));
+        let remote_address = Ipv4Addr::new(192, 168, 12, 230);
         let local_network_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 200));
-        let network = match_interface(interfaces(), remote_address);
+        let network = match_interface(interfaces(), &remote_address);
 
         assert_eq!(network.is_none(), false);
         assert_eq!(network.unwrap().ip(), local_network_address);
 
 
-        let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 24));
+        let remote_address = Ipv4Addr::new(192, 168, 12, 24);
         let local_network_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 50));
-        let network = match_interface(interfaces(), remote_address);
+        let network = match_interface(interfaces(), &remote_address);
 
         assert_eq!(network.is_none(), false);
         assert_eq!(network.unwrap().ip(), local_network_address);

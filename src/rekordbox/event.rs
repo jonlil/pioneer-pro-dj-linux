@@ -1,10 +1,14 @@
 use crate::rekordbox::player::Player;
 use crate::rekordbox::SOFTWARE_IDENTIFICATION;
-use std::net::{Ipv4Addr, SocketAddr, IpAddr};
+use super::packets::{StatusPacket, StatusPacket2};
+use std::net::{Ipv4Addr, SocketAddr};
 use std::str;
+use std::convert::TryFrom;
+use bytes::Bytes;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
+    StatusPacket(StatusPacket),
     ApplicationBroadcast,
     Error,
     InitiateLink,
@@ -33,6 +37,11 @@ impl EventParser {
     }
 
     fn get_type(buffer: &[u8], metadata: (usize, SocketAddr)) -> Event {
+        let address = match metadata.1 {
+            SocketAddr::V4(ip_addr) => ip_addr,
+            _                       => panic!("No support for IPv6"),
+        };
+
         if !Self::is_rekordbox_event(&buffer) {
             return Event::Unknown
         }
@@ -43,7 +52,7 @@ impl EventParser {
                 return Event::PlayerBroadcast(Player::new(
                     Self::parse_model_name(&buffer),
                     buffer[36],
-                    IpAddr::V4(Ipv4Addr::new(buffer[44], buffer[45], buffer[46], buffer[47])),
+                    Ipv4Addr::new(buffer[44], buffer[45], buffer[46], buffer[47]),
                 ))
             } else if &buffer[32..=34] == &[0x01, 0x03, 0x00] {
                 return Event::ApplicationBroadcast
@@ -52,7 +61,7 @@ impl EventParser {
             return Event::PlayerLinkingWaiting(Player::new(
                 Self::parse_model_name(&buffer),
                 buffer[33],
-                metadata.1.ip(),
+                *address.ip(),
             ))
         } else if number_of_bytes == 48 {
             // Here we should initiate that the player have accepted the mnt
@@ -67,12 +76,22 @@ impl EventParser {
         buffer: &[u8],
         metadata: (usize, SocketAddr)
     ) -> Event {
+        match StatusPacket2::try_from(Bytes::from(buffer.to_vec())) {
+            Ok(_packet) => {
+                //eprintln!("Packet: {:#?}\nPeer: {:?}", packet, metadata.1)
+            },
+            Err(err) => {
+                eprintln!("{:?}", err);
+            },
+        };
+
         Self::get_type(&buffer[..metadata.0], metadata)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use super::*;
     use crate::rekordbox::{
         player::Player,
@@ -124,7 +143,7 @@ mod tests {
         assert_eq!(EventParser::get_type(&payload, get_socket_metadata(54)), Event::PlayerBroadcast(Player::new(
             str::from_utf8(&MOCKED_PLAYER_NAME[..]).unwrap().trim_end_matches('\u{0}').to_string(),
             0x03,
-            IpAddr::V4(Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4)),
+            Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4),
         )));
     }
 
@@ -157,7 +176,7 @@ mod tests {
         assert_eq!(EventParser::get_type(&payload, get_socket_metadata(36)), Event::PlayerLinkingWaiting(Player::new(
             str::from_utf8(&MOCKED_PLAYER_NAME[..]).unwrap().trim_end_matches('\u{0}').to_string(),
             0x01,
-            IpAddr::V4(Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4)),
+            Ipv4Addr::new(0xa9, 0xfe, 0x1e, 0xc4),
         )));
     }
 }

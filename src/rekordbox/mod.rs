@@ -10,7 +10,8 @@ pub const APPLICATION_NAME: [u8; 20] = [
     0x4c,0x69,0x6e,0x75,0x78,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
 ];
 
-pub mod client;
+pub mod server;
+
 pub mod event;
 pub mod player;
 pub mod util;
@@ -19,13 +20,26 @@ pub mod util;
 mod message;
 mod library;
 mod packets;
-mod state;
 mod db_field;
 mod db_request_type;
 mod db_message_argument;
 mod metadata_type;
 mod rpc;
+mod db_codec;
+mod status_event_server;
+mod keepalive;
 
 // tests
 #[cfg(test)]
 mod fixtures;
+
+pub trait EventHandler<T> {
+    fn on_event(&self, event: T);
+}
+
+use status_event_server::StatusEventServer;
+pub use server::{Server, ServerState};
+pub use server::Database as Database;
+pub use server::ApplicationEvent as Event;
+use rpc::server as rpc_server;
+use library::DBLibraryServer;

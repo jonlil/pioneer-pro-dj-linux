@@ -1,49 +1,46 @@
-use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
-use crate::rekordbox;
-use crate::rekordbox::event::Event as RekordboxEvent;
+use super::rekordbox::{Server, Database, Event};
+use std::sync::mpsc::{channel, Receiver};
 
-struct RekordboxEventHandler {
-    tx: mpsc::Sender<RekordboxEvent>,
+pub struct App {
+    rekordbox_server: Server,
+    rx: Receiver<Event>,
 }
-
-impl rekordbox::client::EventHandler for RekordboxEventHandler {
-    fn on_event(&self, event: rekordbox::event::Event) {
-        self.tx.send(event).unwrap();
-    }
-}
-
-pub struct App;
 
 impl App {
-    pub fn run(&mut self) -> Result<(), rekordbox::client::Error> {
-        let (tx, rx) = mpsc::channel::<RekordboxEvent>();
+    pub fn new() -> Self {
+        let (tx, rx) = channel::<Event>();
+        let rekordbox_server = Server::new(Database::new(), tx);
 
-        let mut rekordbox_client = rekordbox::client::Client::new();
+        App {
+            rekordbox_server,
+            rx,
+        }
+    }
 
-        let _rekordbox_handler = {
-            let tx = tx.clone();
-            thread::spawn(move || {
-                let _result = rekordbox_client.run(&RekordboxEventHandler {
-                    tx: tx,
-                });
-            })
-        };
+    pub async fn run(&mut self) {
+        self.rekordbox_server.run().await;
 
         loop {
-            match rx.recv() {
-                Ok(evnt) => {
-                    match &evnt {
-                        RekordboxEvent::PlayerBroadcast(_player) => {}
-                        _ => {}
-                    }
-                }
-                _ => ()
-            }
-
-            // Hey, don't steal my CPU.
-            thread::sleep(Duration::from_millis(250));
+            self.next();
+            thread::sleep(std::time::Duration::from_millis(150));
         }
+    }
+
+    fn initiate_linking(&self) {
+        self.rekordbox_server.initiate_mac_ip_negotiation().unwrap();
+    }
+
+    fn next(&self) {
+        match self.rx.recv() {
+            Ok(event) => {
+                match event {
+                    Event::InitiateLink => self.initiate_linking(),
+                    _ => eprintln!("Received no-op event: {:?}", event),
+                };
+            },
+            Err(_) => {},
+        };
+
     }
 }
