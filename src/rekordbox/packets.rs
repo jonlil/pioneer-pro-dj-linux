@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use nom::bytes::complete::{tag, take};
 use nom::number::complete::{be_u16};
 use nom::IResult;
@@ -16,6 +17,14 @@ pub struct ManyDBMessages(Vec<DBMessage>);
 impl ManyDBMessages {
     pub fn new(messages: Vec<DBMessage>) -> ManyDBMessages {
         ManyDBMessages(messages)
+    }
+
+    pub fn push(&mut self, message: DBMessage) {
+        self.0.push(message);
+    }
+
+    pub fn extend(&mut self, iter: Vec<DBMessage>) {
+        self.0.extend(iter);
     }
 }
 
@@ -120,6 +129,17 @@ impl From<DBMessage> for Bytes {
         buffer.extend(Bytes::from(message.arguments));
 
         Bytes::from(buffer)
+    }
+}
+
+impl TryFrom<Bytes> for DBMessage {
+    type Error = &'static str;
+
+    fn try_from(message: Bytes) -> Result<Self, Self::Error> {
+        match DBMessage::parse(&message) {
+            Ok((_input, message)) => Ok(message),
+            Err(err) => Err("Failed decoding DBMessage."),
+        }
     }
 }
 

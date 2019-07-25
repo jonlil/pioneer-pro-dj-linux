@@ -25,6 +25,7 @@ mod db_request_type;
 mod db_message_argument;
 mod metadata_type;
 mod rpc;
+mod db_codec;
 
 // tests
 #[cfg(test)]
