@@ -39,7 +39,10 @@ impl<T: EventHandler> Future for RpcProcedureRouter <T>{
                                 })
                             )
                         },
-                        _ => unimplemented!(),
+                        Err(err) => {
+                            eprintln!("RpcProcedureRouter::Error {:#?}\n{:#?}", err, call);
+                            panic!();
+                        },
                     },
                     self.peer))
                 )
@@ -55,7 +58,7 @@ fn rpc_program_server<T: EventHandler>(handler: Arc<T>) -> Result<u16, Box<std::
     let socket = UdpSocket::bind(&get_ipv4_socket_addr(0))?;
     let local_addr = socket.local_addr()?;
 
-    thread::spawn(move || {
+    thread::Builder::new().name("RpcProgramServer".to_string()).spawn(move || {
         let framed = UdpFramed::new(socket, RpcBytesCodec::new());
         let (sink, stream) = framed.split();
 
@@ -70,7 +73,7 @@ fn rpc_program_server<T: EventHandler>(handler: Arc<T>) -> Result<u16, Box<std::
         tokio::run(sink
             .send_all(event_processor)
             .map(|_| ())
-            .map_err(|e| eprintln!("{:?}", e))
+            .map_err(|e| eprintln!("RpcProgramServer::Error {:?}", e))
         );
     });
 
@@ -155,15 +158,86 @@ fn get_ipv4_socket_addr(port: u16) -> SocketAddr {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+    use bytes::Bytes;
 
-    /// Create a Rpc mock server that only listens on localhost
-    // fn mock_rpc_server() -> RpcServer<T> {
-    //     RpcServer::new(SocketAddr::new(
-    //         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50111),
-    //     )
-    // }
+    struct Context;
+    struct MockEventHandler;
+    impl EventHandler for MockEventHandler {
+        fn on_event(&self, procedure: &RpcProcedure, _call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+            let context = Context;
+
+            match procedure {
+                RpcProcedure::MountExport => {
+                    match mount_export_rpc_callback(context) {
+                        Ok(reply) => Ok(RpcReplyMessage::MountExport(reply)),
+                        Err(err) => Err(err),
+                    }
+                },
+                _ => Err(Error::new(ErrorKind::InvalidInput, "failed")),
+            }
+        }
+    }
+
+    fn mount_export_rpc_callback(_context: Context) -> Result<MountExportReply, std::io::Error> {
+        Ok(MountExportReply {
+            export_list_entries: vec![
+                ExportListEntry::new(
+                    String::from("/C/"),
+                    vec![
+                        String::from("127.0.0.1/24"),
+                    ],
+                ),
+            ],
+        })
+    }
+
+    fn mock_rpc_server() {
+        let server_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50111);
+        let server = RpcServer::new(server_address.clone());
+        thread::spawn(move || {
+            server.run(Arc::new(MockEventHandler)).unwrap();
+        });
+    }
+
+    fn portmap_server_address<'a>() -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50111)
+    }
+
+    fn rpc_allocated_server_address(port: u16) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port)
+    }
 
     #[test]
-    fn export_mount_service() {}
+    fn export_mount_service() {
+        let client_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50222);
+        let mut rpc_client = UdpSocket::bind(&client_address).expect("Failed to bind RPC Mock Client socket");
+        let portmap_getport_call = Bytes::from(vec![
+            0x00, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x86, 0xa0,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x14,
+            0xfe, 0xc9, 0x98, 0x11, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x86, 0xa5,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x11,
+            0x00, 0x00, 0x00, 0x00
+        ]);
+        let mount_export_call    = b"\0\0\0\x0c\0\0\0\0\0\0\0\x02\0\x01\x86\xa5\0\0\0\x01\0\0\0\x05\0\0\0\x01\0\0\0\x14\xb0\xb61\x14\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        let _mock_rpc_server = mock_rpc_server();
+
+        assert_eq!(76, rpc_client.send_to(&portmap_getport_call, &portmap_server_address()).unwrap());
+        let mut buffer = [0; 512];
+        let response = rpc_client.recv_from(&mut buffer);
+        assert_eq!((28, portmap_server_address()), response.unwrap());
+
+        // TODO: Implment RpcReplyMessage::decode
+        // Extract allocated port from portmap reply
+        let allocated_port: u16 = u16::from_be_bytes([buffer[26], buffer[27]]);
+        assert_eq!(60, rpc_client.send_to(mount_export_call, &rpc_allocated_server_address(allocated_port.clone())).unwrap());
+        let mut buffer = [0; 512];
+        let response = rpc_client.recv_from(&mut buffer);
+        assert_eq!((70, rpc_allocated_server_address(allocated_port.clone())), response.unwrap());
+    }
 }

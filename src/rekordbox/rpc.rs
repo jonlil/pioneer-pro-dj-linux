@@ -6,10 +6,10 @@ use crate::rpc::packets::*;
 
 struct Context<'a> {
     state: &'a LockedClientState,
-    call: RpcCall,
+    call: &'a RpcCall,
 }
 
-fn mount_mnt_rpc_callback(context: Context, data: MountMnt) -> Result<MountMntReply, std::io::Error> {
+fn mount_mnt_rpc_callback(_context: Context, _data: &MountMnt) -> Result<MountMntReply, std::io::Error> {
     Ok(MountMntReply::new(0, [0x00; 32]))
 }
 
@@ -22,6 +22,8 @@ fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::
                 },
                 _ => panic!("IPv6 is not supported"),
             };
+
+            eprintln!("{:?}", address);
 
             return Ok(MountExportReply {
                 export_list_entries: vec![
@@ -51,7 +53,7 @@ impl EventHandler {
 }
 
 impl RpcEventHandler for EventHandler {
-    fn on_event(&self, procedure: RpcProcedure, call: RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+    fn on_event(&self, procedure: &RpcProcedure, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
         let context = Context {
             call: call,
             state: &self.state,
@@ -70,7 +72,7 @@ impl RpcEventHandler for EventHandler {
                     Err(err) => Err(err),
                 }
             },
-            _ => Err(Error::new(ErrorKind::InvalidInput, "failed")),
+            _ => Err(Error::new(ErrorKind::InvalidInput, "RpcProcedure not implemented")),
         }
     }
 }

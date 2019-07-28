@@ -56,7 +56,7 @@ impl TryFrom<Bytes> for RpcMessage {
         match RpcMessage::decode(&message) {
             Ok((_input, message)) => Ok(message),
             _ => {
-                eprintln!("{:?}", message);
+                eprintln!("TryFrom failed: {:?}", message);
                 Err("Failed decoding Bytes into RpcMessage")
             },
         }
@@ -173,7 +173,7 @@ pub struct RpcReply {
 impl Decoder for RpcReply {
     type Output = Self;
 
-    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+    fn decode(_input: &[u8]) -> IResult<&[u8], Self::Output> {
         unimplemented!()
     }
 }
@@ -637,6 +637,50 @@ mod test {
     use super::*;
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn test_decoding_portmap_nfs_call() {
+        let call = Bytes::from(vec![
+            0x00, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x86, 0xa0,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x14,
+            0x25, 0x37, 0x91, 0x2c, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x86, 0xa3,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x11,
+            0x00, 0x00, 0x00, 0x00
+        ]);
+
+        assert_eq!(
+            Ok((&[][..], RpcMessage {
+                xid: 259u32,
+                message: RpcMessageType::Call(RpcCall {
+                    version: 2,
+                    program: RpcProgram::Portmap,
+                    program_version: 2,
+                    procedure: RpcProcedure::PortmapGetport(PortmapGetport {
+                        version: 2,
+                        program: RpcProgram::Nfs,
+                        protocol: PortmapProtocol::Udp,
+                        port: 0,
+                    }),
+                    credentials: RpcCredentials {
+                        flavor: 1,
+                        length: 20,
+                        stamp: 624398636,
+                        machine_name: 0u32,
+                        uid: 0u32,
+                        gid: 0u32,
+                        aux_gid: 0u32,
+                    },
+                    verifier: RpcAuth::Null,
+                }),
+            })),
+            RpcMessage::decode(&call),
+        );
+    }
 
     #[test]
     fn test_decoding_portmap_getport_call() {

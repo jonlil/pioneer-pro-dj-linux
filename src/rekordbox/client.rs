@@ -256,8 +256,14 @@ fn send_data<A: ToSocketAddrs>(
     }
 }
 
-fn random_broadcast_socket(address: &PioneerNetwork, data: Message::RekordboxMessageType) {
-    let socket = UdpSocket::bind((address.ip(), 0)).unwrap();
-    socket.set_broadcast(true).unwrap();
-    send_data(&socket, (address.broadcast(), 50000), data);
+fn random_broadcast_socket(
+    address: &PioneerNetwork,
+    data: Message::RekordboxMessageType
+)-> std::io::Result<()> {
+    {
+        let mut socket = UdpSocket::bind((address.ip(), 0))?;
+        socket.set_broadcast(true)?;
+        send_data(&socket, (address.broadcast(), 50000), data)
+    }
+    Ok(())
 }
