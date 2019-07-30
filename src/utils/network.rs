@@ -3,7 +3,7 @@ extern crate ipnetwork;
 
 use pnet::datalink::{NetworkInterface, MacAddr, interfaces};
 use ipnetwork::{IpNetwork};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 
 #[derive(Debug, PartialEq)]
 pub struct PioneerNetwork {
@@ -37,11 +37,12 @@ impl PioneerNetwork {
     }
 }
 
-pub fn find_interface(address: IpAddr) -> Option<PioneerNetwork> {
+pub fn find_interface(address: Ipv4Addr) -> Option<PioneerNetwork> {
     match_interface(interfaces(), address)
 }
 
-fn match_interface(ifaces: Vec<NetworkInterface>, address: IpAddr) -> Option<PioneerNetwork> {
+fn match_interface(ifaces: Vec<NetworkInterface>, address: Ipv4Addr) -> Option<PioneerNetwork> {
+    let address = IpAddr::V4(address);
     ifaces.iter()
         .flat_map(|iface| iface.ips.iter().map(move |ip| PioneerNetwork::new(
             *ip,
@@ -121,7 +122,7 @@ mod tests {
 
     #[test]
     fn it_finds_local_address_based_on_remote_address() {
-        let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 10, 52));
+        let remote_address = Ipv4Addr::new(192, 168, 10, 52);
         let local_network_address = IpNetwork::V4(Ipv4Network::new(
                 Ipv4Addr::new(192, 168, 10, 50), 24).unwrap());
 
@@ -136,7 +137,7 @@ mod tests {
 
     #[test]
     fn it_find_network_in_a_smaller_cidr() {
-        let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 230));
+        let remote_address = Ipv4Addr::new(192, 168, 12, 230);
         let local_network_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 200));
         let network = match_interface(interfaces(), remote_address);
 
@@ -144,7 +145,7 @@ mod tests {
         assert_eq!(network.unwrap().ip(), local_network_address);
 
 
-        let remote_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 24));
+        let remote_address = Ipv4Addr::new(192, 168, 12, 24);
         let local_network_address = IpAddr::V4(Ipv4Addr::new(192, 168, 12, 50));
         let network = match_interface(interfaces(), remote_address);
 

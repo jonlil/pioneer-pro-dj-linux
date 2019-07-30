@@ -2,8 +2,10 @@ use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::io::{Error, ErrorKind, Read, Write, self};
 use std::thread;
 use std::sync::Arc;
+use std::collections::HashMap;
 use tokio::prelude::*;
 use tokio::net::{UdpFramed, UdpSocket};
+use tokio::runtime::current_thread::Runtime;
 use futures::{Future, Async, Poll};
 use super::packets::*;
 use super::codec::RpcBytesCodec;
@@ -58,7 +60,8 @@ fn rpc_program_server<T: EventHandler>(handler: Arc<T>) -> Result<u16, Box<std::
     let socket = UdpSocket::bind(&get_ipv4_socket_addr(0))?;
     let local_addr = socket.local_addr()?;
 
-    thread::Builder::new().name("RpcProgramServer".to_string()).spawn(move || {
+    thread::spawn(move || {
+        let mut runtime = Runtime::new().unwrap();
         let framed = UdpFramed::new(socket, RpcBytesCodec::new());
         let (sink, stream) = framed.split();
 
@@ -70,11 +73,11 @@ fn rpc_program_server<T: EventHandler>(handler: Arc<T>) -> Result<u16, Box<std::
             }
         });
 
-        tokio::run(sink
+        runtime.block_on(sink
             .send_all(event_processor)
             .map(|_| ())
             .map_err(|e| eprintln!("RpcProgramServer::Error {:?}", e))
-        );
+        )
     });
 
     Ok(local_addr.port())
@@ -82,7 +85,11 @@ fn rpc_program_server<T: EventHandler>(handler: Arc<T>) -> Result<u16, Box<std::
 
 pub struct RpcServer {
     socket_addr: SocketAddr,
-    clients: Vec<()>,
+    programs: HashMap<(
+        RpcProgram,
+        u32,
+        PortmapProtocol,
+    ), u16>,
 }
 
 /// This is the Portmap server
@@ -90,7 +97,7 @@ impl RpcServer {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             socket_addr: addr,
-            clients: vec![],
+            programs: HashMap::new(),
         }
     }
 
@@ -208,7 +215,7 @@ mod test {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port)
     }
 
-    #[test]
+    //#[test]
     fn export_mount_service() {
         let client_address = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 50222);
         let mut rpc_client = UdpSocket::bind(&client_address).expect("Failed to bind RPC Mock Client socket");

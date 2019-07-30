@@ -1,13 +1,16 @@
+use std::convert::TryFrom;
 use std::net::{UdpSocket, ToSocketAddrs, SocketAddr, Ipv4Addr, IpAddr};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::thread::{self, JoinHandle};
 use std::io::ErrorKind;
 use std::time::Duration;
+use bytes::Bytes;
 
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
+use super::packets::StatusPacket;
 use crate::rpc::server::{RpcServer};
 use super::rpc::EventHandler as RpcEventHandler;
 use super::library::DBLibraryServer;
@@ -95,7 +98,16 @@ impl Client {
                 let mut buffer = [0u8; 512];
                 // The lock is fine here since the socket is set to non_blocking
                 match socket.lock().unwrap().recv_from(&mut buffer) {
-                    Ok(metadata) => Self::event_parser(&buffer, metadata, &tx),
+                    Ok(metadata) => {
+                        match StatusPacket::try_from(&buffer[..metadata.0]) {
+                            Ok(packet) => eprintln!("{:#?}", packet),
+                            Err(err) => {
+                                eprintln!("err: {:?}\nBuffer: {:?}", err, &buffer[..metadata.0]);
+                            }
+                        }
+
+                        Self::event_parser(&buffer, metadata, &tx)
+                    },
 
                     // Since this socket is non_blocking we might receive OS Errors (resource
                     // not available etc.) The error kind matcher reduces the logging of that.

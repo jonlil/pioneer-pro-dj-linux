@@ -387,8 +387,8 @@ impl From<RpcMessageType> for Bytes {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum RpcProgram {
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum RpcProgram {
     Portmap,
     Nfs,
     Mount,
@@ -527,8 +527,8 @@ impl Decoder for PortmapGetport {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum PortmapProtocol {
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum PortmapProtocol {
     Ip,
     Udp,
 }

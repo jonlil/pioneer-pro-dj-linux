@@ -1,8 +1,13 @@
 use std::convert::TryFrom;
 use nom::bytes::complete::{tag, take};
-use nom::number::complete::{be_u16};
-use nom::IResult;
-use bytes::{Bytes, BytesMut};
+use nom::number::complete::{be_u64, be_u32, be_u16, be_u8};
+use nom::{
+    IResult,
+    sequence::tuple,
+    multi::count,
+};
+use bytes::{Bytes, BytesMut, BufMut};
+use std::net::Ipv4Addr;
 use super::db_field::{DBField, DBFieldType, Binary};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
@@ -149,6 +154,599 @@ impl From<ManyDBMessages> for Bytes {
             acc.extend(Bytes::from(message));
             acc
         }))
+    }
+}
+
+const UDP_MAGIC: [u8; 10] = [0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c];
+
+
+pub mod TermDj {
+    use bytes::Bytes;
+
+    const APPLICATION_NAME: &str = "TermDJ";
+
+    pub struct Name;
+    impl From<Name> for Bytes {
+        fn from(_val: Name) -> Bytes {
+            Bytes::from("TermDJ".encode_utf16()
+                .into_iter()
+                .flat_map(|item| { item.to_be_bytes().to_vec() })
+                .collect::<Bytes>())
+        }
+    }
+
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ModelName(String);
+
+impl ModelName {
+    pub fn new(name: String) -> ModelName { ModelName(name) }
+
+    fn decode(input: &[u8]) -> IResult<&[u8], ModelName> {
+        let (input, model) = take(20u8)(input)?;
+
+        match String::from_utf8(model.to_vec()) {
+            Ok(model) => Ok((input, ModelName(model.trim_end_matches('\u{0}').to_string()))),
+            Err(_err) => Err(nom::Err::Error((input, nom::error::ErrorKind::Tag))),
+        }
+    }
+
+    fn encode(self) -> Bytes {
+        let mut model = self.0.as_bytes().to_vec();
+        let padding = 20 - model.len();
+        if padding > 0 {
+            model.extend(vec![0x00; padding as usize])
+        }
+
+        Bytes::from(model)
+    }
+}
+
+impl From<ModelName> for Bytes {
+    fn from(model_name: ModelName) -> Self {
+        model_name.encode()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum PlayerSlot {
+  Empty,
+  Cd,
+  Sd,
+  Usb,
+  Rekordbox,
+  Unknown(u8),
+}
+
+impl PlayerSlot {
+    fn decode(input: &[u8]) -> IResult<&[u8], PlayerSlot> {
+        let (input, value) = be_u8(input)?;
+
+        Ok((input, match value {
+            0 => PlayerSlot::Empty,
+            1 => PlayerSlot::Cd,
+            2 => PlayerSlot::Sd,
+            3 => PlayerSlot::Usb,
+            4 => PlayerSlot::Rekordbox,
+            _ => PlayerSlot::Unknown(value),
+        }))
+    }
+}
+
+impl From<PlayerSlot> for Bytes {
+    fn from(slot: PlayerSlot) -> Bytes {
+        Bytes::from(vec![match slot {
+             PlayerSlot::Empty => 0,
+             PlayerSlot::Cd => 1,
+             PlayerSlot::Sd => 2,
+             PlayerSlot::Usb => 3,
+             PlayerSlot::Rekordbox => 4,
+             PlayerSlot::Unknown(value) => value,
+        }])
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct UdpMagic;
+
+impl UdpMagic {
+    fn decode(input: &[u8]) -> IResult<&[u8], UdpMagic> {
+        let (input, _) = tag(UDP_MAGIC)(input)?;
+        Ok((input, UdpMagic))
+    }
+}
+
+impl From<UdpMagic> for Bytes {
+    fn from(_magic: UdpMagic) -> Bytes {
+        Bytes::from(UDP_MAGIC.to_vec())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct StatusPacket {
+    kind: StatusPacketType,
+    model: ModelName,
+    unknown1: u8,
+    player_number: u8,
+    content: StatusContentType,
+}
+
+// TODO: Remove debug struct
+#[derive(Debug, PartialEq)]
+pub struct StatusPacket2 {
+    kind: StatusPacketType,
+    model: ModelName,
+}
+
+impl StatusPacket2 {
+    fn decode(input: &[u8]) -> IResult<&[u8], StatusPacket2> {
+        let (input, _) = UdpMagic::decode(input)?;
+        let (input, kind) = StatusPacketType::decode(input)?;
+        let (input, model)  = ModelName::decode(input)?;
+
+        Ok((input, StatusPacket2 {
+            kind,
+            model,
+        }))
+    }
+}
+
+impl TryFrom<Bytes> for StatusPacket2 {
+    type Error = &'static str;
+
+    fn try_from(message: Bytes) -> Result<Self, Self::Error> {
+        match StatusPacket2::decode(&message) {
+            Ok((_input, message)) => Ok(message),
+            Err(_err) => Err("Failed decoding StatusPacket2."),
+        }
+    }
+}
+
+impl StatusPacket {
+    pub fn new(
+        kind: StatusPacketType,
+        unknown1: u8,
+        player_number: u8,
+        content: StatusContentType
+    ) -> StatusPacket {
+        StatusPacket {
+            kind: kind,
+            model: ModelName("Linux".to_string()),
+            unknown1: unknown1,
+            player_number: player_number,
+            content: content,
+        }
+    }
+
+    fn decode(input: &[u8]) -> IResult<&[u8], StatusPacket> {
+        let (input, _) = UdpMagic::decode(input)?;
+        let (input, kind) = StatusPacketType::decode(input)?;
+        let (input, model)  = ModelName::decode(input)?;
+        let (input, _unknown) = be_u8(input)?;
+        let (input, unknown1) = be_u8(input)?;
+        let (input, player_number) = be_u8(input)?;
+        let (input, content) = kind.decode_content(input)?;
+
+        Ok((input, StatusPacket {
+            kind,
+            model,
+            unknown1,
+            player_number,
+            content,
+        }))
+    }
+
+    pub fn kind(&self) -> &StatusPacketType {
+        &self.kind
+    }
+}
+
+impl From<StatusPacket> for Bytes {
+    fn from(packet: StatusPacket) -> Bytes {
+        let mut buffer = BytesMut::new();
+
+        buffer.extend(Bytes::from(UdpMagic));
+        buffer.extend(Bytes::from(packet.kind.clone()));
+        buffer.extend(Bytes::from(packet.model));
+        buffer.extend(Bytes::from(vec![
+            0x01, // some const value
+            packet.unknown1,
+            0x11, // rekordbox, players use their player_number here.
+        ]));
+        buffer.extend(Bytes::from(packet.content));
+
+        Bytes::from(buffer)
+    }
+}
+
+impl TryFrom<Bytes> for StatusPacket {
+    type Error = &'static str;
+
+    fn try_from(message: Bytes) -> Result<Self, Self::Error> {
+        match StatusPacket::decode(&message) {
+            Ok((_input, message)) => Ok(message),
+            Err(_err) => Err("Failed decoding StatusPacket."),
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for StatusPacket {
+    type Error = &'static str;
+
+    fn try_from(message: &[u8]) -> Result<Self, Self::Error> {
+        Self::try_from(Bytes::from(message))
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum StatusPacketType {
+    Cdj,
+    Djm,
+    LoadCmd,
+    LoadCmdReply,
+    LinkQuery,
+    LinkReply,
+    RekordboxHello,
+    RekordboxReply,
+    Unknown(u8),
+}
+
+impl StatusPacketType {
+    fn decode(input: &[u8]) -> IResult<&[u8], StatusPacketType> {
+        let (input, kind) = take(1u8)(input)?;
+
+        Ok((input, match kind[0] {
+            0x0a => StatusPacketType::Cdj,
+            0x29 => StatusPacketType::Djm,
+            0x19 => StatusPacketType::LoadCmd,
+            0x1a => StatusPacketType::LoadCmdReply,
+            0x05 => StatusPacketType::LinkQuery,
+            0x06 => StatusPacketType::LinkReply,
+            0x10 => StatusPacketType::RekordboxHello,
+            0x11 => StatusPacketType::RekordboxReply,
+            _    => StatusPacketType::Unknown(kind[0]),
+        }))
+    }
+
+    fn decode_content<'a>(&self, input: &'a [u8]) -> IResult<&'a [u8], StatusContentType> {
+        let (input, decoded_value) = (match self {
+            StatusPacketType::LinkQuery      => LinkQuery::decode,
+            StatusPacketType::RekordboxHello => RekordboxHello::decode,
+            StatusPacketType::LinkReply      => LinkReply::decode,
+            StatusPacketType::Cdj            => Cdj::decode,
+            _ => {
+                eprintln!("{:?}", self);
+                unimplemented!()
+            },
+        })(input)?;
+        Ok((input, decoded_value))
+    }
+}
+
+impl From<StatusPacketType> for Bytes {
+    fn from(packet_type: StatusPacketType) -> Bytes {
+        Bytes::from([match packet_type {
+            StatusPacketType::Cdj => 0x0a,
+            StatusPacketType::Djm => 0x29,
+            StatusPacketType::LoadCmd => 0x19,
+            StatusPacketType::LoadCmdReply => 0x1a,
+            StatusPacketType::LinkQuery => 0x05,
+            StatusPacketType::LinkReply => 0x06,
+            StatusPacketType::RekordboxHello => 0x10,
+            StatusPacketType::RekordboxReply => 0x11,
+            StatusPacketType::Unknown(val) => val,
+        }].to_vec())
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Utf16FixedString {
+    capacity: usize,
+    value: String,
+}
+
+impl Utf16FixedString {
+    pub fn new(value: String, capacity: usize) -> Utf16FixedString {
+        Utf16FixedString {
+            value,
+            capacity,
+        }
+    }
+
+    fn decode(input: &[u8], capacity: usize) -> IResult<&[u8], Utf16FixedString> {
+        let (input, value) = count(be_u16, capacity / 2)(input)?;
+
+        let value = match String::from_utf16(&value) {
+            Ok(val)  => val,
+            Err(_err) => return Err(nom::Err::Error((input, nom::error::ErrorKind::Tag))),
+        };
+
+        Ok((input, Utf16FixedString {
+            value: value,
+            capacity: capacity
+        }))
+    }
+}
+
+impl From<Utf16FixedString> for Bytes {
+    fn from(fixed_string: Utf16FixedString) -> Bytes {
+        let mut encoded = fixed_string.value
+            .encode_utf16()
+            .into_iter()
+            .flat_map(|item| { item.to_be_bytes().to_vec() })
+            .collect::<Vec<u8>>();
+        encoded.extend(vec![0x00; fixed_string.capacity - encoded.len()]);
+
+        Bytes::from(encoded)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum TrackAnalyzeType {
+    Unknown,
+    Rekordbox,
+    File,
+    Cd,
+}
+
+impl TrackAnalyzeType {
+    fn decode(input: &[u8]) -> IResult<&[u8], TrackAnalyzeType> {
+        let (input, track_analyze_type) = be_u8(input)?;
+
+        Ok((
+            input,
+            match track_analyze_type {
+                0 => TrackAnalyzeType::Unknown,
+                1 => TrackAnalyzeType::Rekordbox,
+                2 => TrackAnalyzeType::File,
+                5 => TrackAnalyzeType::Cd,
+                _ => TrackAnalyzeType::Unknown,
+            }
+        ))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Cdj {
+    activity: u16,
+    loaded_player_number: u16,
+    loaded_slot: PlayerSlot,
+    track_analyze_type: TrackAnalyzeType,
+    track_id: u32,
+    track_number: u32,
+}
+
+impl Cdj {
+    fn decode(input: &[u8]) -> IResult<&[u8], StatusContentType> {
+        let (input, activity) = be_u16(input)?;
+        let (input, loaded_player_number) = be_u16(input)?;
+        let (input, loaded_slot) = PlayerSlot::decode(input)?;
+        let (input, track_analyze_type) = TrackAnalyzeType::decode(input)?;
+        let (input, _padding) = take(1u8)(input)?;
+        let (input, track_id) = be_u32(input)?;
+        let (input, track_number) = be_u32(input)?;
+
+        Ok((
+            input,
+            StatusContentType::Cdj(Cdj {
+                activity,
+                loaded_player_number,
+                loaded_slot,
+                track_analyze_type,
+                track_id,
+                track_number,
+            })
+        ))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct LinkReply {
+    pub source_player_number: u8,
+    pub slot: PlayerSlot,
+    pub name: Utf16FixedString,
+    pub date: Utf16FixedString,
+    pub unknown5: Utf16FixedString,
+    pub track_count: u32,
+    pub unknown6: u16,
+    pub unknown7: u16,
+    pub playlist_count: u32,
+    pub bytes_total: u64,
+    pub bytes_free: u64,
+}
+
+impl LinkReply {
+    fn decode(input: &[u8]) -> IResult<&[u8], StatusContentType> {
+        let (input, slot) = PlayerSlot::decode(input)?;
+        let (input, name) = Utf16FixedString::decode(input, 64)?;
+        let (input, date) = Utf16FixedString::decode(input, 24)?;
+        let (input, unknown5) = Utf16FixedString::decode(input, 32)?;
+        let (input, track_count) = be_u32(input)?;
+        let (input, unknown6) = be_u16(input)?;
+        let (input, unknown7) = be_u16(input)?;
+        let (input, playlist_count) = be_u32(input)?;
+        let (input, bytes_total) = be_u64(input)?;
+        let (input, bytes_free) = be_u64(input)?;
+
+        Ok((
+            input,
+            StatusContentType::LinkReply(LinkReply {
+                source_player_number: 0x11,
+                slot: slot,
+                name: name,
+                date: date,
+                unknown5: unknown5,
+                track_count: track_count,
+                unknown6: unknown6,
+                unknown7: unknown7,
+                playlist_count: playlist_count,
+                bytes_total: bytes_total,
+                bytes_free: bytes_free,
+            }),
+        ))
+    }
+}
+
+impl From<LinkReply> for Bytes {
+    fn from(reply: LinkReply) -> Bytes {
+        let mut buf = BytesMut::new();
+
+        buf.extend((156 as u16).to_be_bytes().to_vec());
+        buf.extend(vec![0x00, 0x00, 0x00]);
+        buf.put(reply.source_player_number);
+        buf.extend(vec![0x00, 0x00, 0x00]);
+        buf.extend(Bytes::from(reply.slot));
+        buf.extend(Bytes::from(reply.name));
+        buf.extend(Bytes::from(reply.date));
+        buf.extend(Bytes::from(reply.unknown5));
+        buf.extend(Bytes::from(reply.track_count.to_be_bytes().to_vec()));
+        buf.extend(Bytes::from(reply.unknown6.to_be_bytes().to_vec()));
+        buf.extend(Bytes::from(reply.unknown7.to_be_bytes().to_vec()));
+        buf.extend(Bytes::from(reply.playlist_count.to_be_bytes().to_vec()));
+        buf.extend(Bytes::from(reply.bytes_total.to_be_bytes().to_vec()));
+        buf.extend(Bytes::from(reply.bytes_free.to_be_bytes().to_vec()));
+
+        buf.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct LinkQuery {
+    source_ip: Ipv4Addr,
+    remote_player_number: u8,
+    slot: PlayerSlot,
+}
+
+impl LinkQuery {
+    fn decode(input: &[u8]) -> IResult<&[u8], StatusContentType> {
+        let (input, _u3) = be_u16(input)?;
+        let (input, source_ip) = take(4u8)(input)?;
+        let (input, _padding) = take(3u8)(input)?;
+        let (input, remote_player_number) = be_u8(input)?;
+        let (input, _padding) = take(3u8)(input)?;
+        let (input, slot) = PlayerSlot::decode(input)?;
+
+        Ok((input, StatusContentType::LinkQuery(LinkQuery {
+            source_ip: Ipv4Addr::new(
+                source_ip[0],
+                source_ip[1],
+                source_ip[2],
+                source_ip[3],
+            ),
+            remote_player_number: remote_player_number,
+            slot: slot,
+        })))
+    }
+}
+
+struct RekordboxHello;
+impl RekordboxHello {
+    fn decode(input: &[u8]) -> IResult<&[u8], StatusContentType> {
+        Ok((input, StatusContentType::RekordboxHello))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum StatusContentType {
+    Cdj(Cdj),
+    Djm,
+    LoadCmd,
+    LoadCmdReply,
+    LinkQuery(LinkQuery),
+    LinkReply(LinkReply),
+    RekordboxHello,
+    RekordboxReply(RekordboxReply),
+    Unknown(u8),
+}
+
+impl From<StatusContentType> for Bytes {
+    fn from(status_content_type: StatusContentType) -> Bytes {
+        match status_content_type {
+            StatusContentType::RekordboxReply(reply) => Bytes::from(reply),
+            StatusContentType::LinkReply(reply) => Bytes::from(reply),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct RekordboxReply {
+    pub name: String,
+}
+
+impl From<RekordboxReply> for Bytes {
+    fn from(reply: RekordboxReply) -> Bytes {
+        let mut buffer = BytesMut::from(vec![
+            0x01, 0x04,
+            0x11, 0x01,
+            0x00, 0x00, // padding
+        ]);
+
+        // Convert to Utf16FixedString
+        let mut encoded_name = reply.name
+            .encode_utf16()
+            .into_iter()
+            .flat_map(|item| { item.to_be_bytes().to_vec() })
+            .collect::<Vec<u8>>();
+        encoded_name.extend(vec![0x00; 256 - encoded_name.len()]);
+        buffer.extend(encoded_name);
+
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum KeepAlivePacketType {
+    Hello,
+    Number,
+    Mac,
+    Ip,
+    Status,
+    Change,
+    Unknown(u8),
+}
+
+impl KeepAlivePacketType {
+    fn decode(input: &[u8]) -> IResult<&[u8], KeepAlivePacketType> {
+        let (input, kind) = take(1u8)(input)?;
+
+        Ok((input, match kind[0] {
+            0x25 => KeepAlivePacketType::Hello,
+            0x26 => KeepAlivePacketType::Number,
+            0x2c => KeepAlivePacketType::Mac,
+            0x32 => KeepAlivePacketType::Ip,
+            0x36 => KeepAlivePacketType::Status,
+            0x29 => KeepAlivePacketType::Change,
+            _    => KeepAlivePacketType::Unknown(kind[0]),
+        }))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct KeepAlivePacket {
+    kind: KeepAlivePacketType,
+}
+
+impl KeepAlivePacket {
+    fn decode(input: &[u8]) -> IResult<&[u8], KeepAlivePacket> {
+
+        let (input, kind) = KeepAlivePacketType::decode(input)?;
+
+        Ok((input, KeepAlivePacket {
+            kind,
+        }))
+    }
+}
+
+impl TryFrom<Bytes> for KeepAlivePacket {
+    type Error = &'static str;
+
+    fn try_from(message: Bytes) -> Result<Self, Self::Error> {
+        match KeepAlivePacket::decode(&message) {
+            Ok((_input, message)) => Ok(message),
+            Err(err) => Err("Failed decoding KeepAlivePacket."),
+        }
     }
 }
 
@@ -324,5 +922,146 @@ mod test {
                 DBField::from(Binary::new(Bytes::new())),
             ]),
         ))), DBMessage::parse(&data));
+    }
+
+    #[test]
+    fn decode_link_query() {
+        assert_eq!(Ok((&[][..], StatusPacket {
+            kind: StatusPacketType::LinkQuery,
+            model: ModelName("XDJ-700".to_string()),
+            unknown1: 0,
+            player_number: 1,
+            content: StatusContentType::LinkQuery(LinkQuery {
+                source_ip: Ipv4Addr::new(192, 168, 10, 58),
+                remote_player_number: 17,
+                slot: PlayerSlot::Rekordbox,
+            }),
+        })), StatusPacket::decode(&fixtures::link_query()[..48]))
+    }
+
+    #[test]
+    fn decode_rekordbox_hello() {
+        assert_eq!(Ok((&[][..], StatusPacket {
+            kind: StatusPacketType::RekordboxHello,
+            model: ModelName("XDJ-700".to_string()),
+            unknown1: 0,
+            player_number: 1,
+            content: StatusContentType::RekordboxHello,
+        })), StatusPacket::decode(&fixtures::rekordbox_hello()[..34]))
+    }
+
+    #[test]
+    fn encode_rekordbox_reply() {
+        assert_eq!(
+            Bytes::from(StatusPacket {
+                kind: StatusPacketType::RekordboxReply,
+                model: ModelName("Linux".to_string()),
+                unknown1: 1,
+                player_number: 1,
+                content: StatusContentType::RekordboxReply(RekordboxReply {
+                    name: "Term DJ".to_string(),
+                })
+            }),
+            Bytes::from(vec![
+                0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a,
+                0x4f, 0x4c, 0x11, 0x4c, 0x69, 0x6e, 0x75, 0x78,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+                0x01, 0x11, 0x01, 0x04, 0x11, 0x01, 0x00, 0x00,
+                0x00, 0x54, 0x00, 0x65, 0x00, 0x72, 0x00, 0x6d,
+                0x00, 0x20, 0x00, 0x44, 0x00, 0x4a, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            ])
+        );
+    }
+
+    #[test]
+    fn build_discovery_sequence() {
+        let data = Bytes::from(vec![
+            0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a,
+            0x4f, 0x4c, 0x29, 0x72, 0x65, 0x6b, 0x6f, 0x72,
+            0x64, 0x62, 0x6f, 0x78, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x01, 0x11, 0x00, 0x38, 0x11, 0x00, 0x00, 0xc0,
+            0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x10, 0x00, 0x00, 0x00, 0x09, 0xff, 0x00
+        ]);
+    }
+
+    #[test]
+    fn encode_linking_reply() {
+        assert_eq!(
+            Bytes::from(vec![
+                0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c, 0x06, 0x72, 0x65, 0x6b, 0x6f, 0x72,
+                0x64, 0x62, 0x6f, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+                0x01, 0x11, 0x00, 0x9c, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x04, 0x00, 0x72, 0x00, 0x65,
+                0x00, 0x6b, 0x00, 0x6f, 0x00, 0x72, 0x00, 0x64, 0x00, 0x62, 0x00, 0x6f, 0x00, 0x78, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x1b, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x5e,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            ]),
+            Bytes::from(StatusPacket {
+                kind: StatusPacketType::LinkReply,
+                model: ModelName("rekordbox".to_string()),
+                unknown1: 1,
+                player_number: 1,
+                content: StatusContentType::LinkReply(LinkReply {
+                    source_player_number: 0x11,
+                    slot: PlayerSlot::Rekordbox,
+                    name: Utf16FixedString {
+                        value: "rekordbox".to_string(),
+                        capacity: 64,
+                    },
+                    date: Utf16FixedString {
+                        value: "".to_string(),
+                        capacity: 24,
+                    },
+                    unknown5: Utf16FixedString {
+                        value: "".to_string(),
+                        capacity: 32,
+                    },
+                    track_count: 1051,
+                    unknown6: 0,
+                    unknown7: 257,
+                    playlist_count: 94,
+                    bytes_total: 0,
+                    bytes_free: 0,
+                }),
+            }),
+        );
     }
 }
