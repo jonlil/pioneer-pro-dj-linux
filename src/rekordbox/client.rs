@@ -10,7 +10,7 @@ use bytes::Bytes;
 use crate::rekordbox::message as Message;
 use crate::utils::network::{PioneerNetwork, find_interface};
 use super::event::{self, Event, EventParser};
-use super::packets::StatusPacket;
+use super::status_event_server::StatusEventServer;
 use crate::rpc::server::{RpcServer};
 use super::rpc::EventHandler as RpcEventHandler;
 use super::library::DBLibraryServer;
@@ -92,32 +92,12 @@ impl Client {
 
     // This handler should be able to receive messages from the parent thread
     // It may also be good if it had support for unwraping events that it just should respond to.
-    fn message_handler(socket: LockedUdpSocket, tx: Sender<Event>) -> JoinHandle<Event> {
+    fn message_handler(socket: LockedUdpSocket, tx: Sender<Event>) -> JoinHandle<()> {
+        let status_event_server = StatusEventServer::new(socket);
         thread::spawn(move || {
-            loop {
-                let mut buffer = [0u8; 512];
-                // The lock is fine here since the socket is set to non_blocking
-                match socket.lock().unwrap().recv_from(&mut buffer) {
-                    Ok(metadata) => {
-                        match StatusPacket::try_from(&buffer[..metadata.0]) {
-                            Ok(packet) => eprintln!("{:#?}", packet),
-                            Err(err) => {
-                                eprintln!("err: {:?}\nBuffer: {:?}", err, &buffer[..metadata.0]);
-                            }
-                        }
-
-                        Self::event_parser(&buffer, metadata, &tx)
-                    },
-
-                    // Since this socket is non_blocking we might receive OS Errors (resource
-                    // not available etc.) The error kind matcher reduces the logging of that.
-                    Err(ref err) if err.kind() != ErrorKind::WouldBlock => {
-                        println!("Something went wrong: {}", err)
-                    },
-                    // Don't bother
-                    _ => {},
-                }
-                thread::sleep(Duration::from_millis(150));
+            match status_event_server.run() {
+                Ok(_) => {},
+                Err(err) => eprintln!("MessageHandler: StatusEventServer crasched. {:?}", err),
             }
         })
     }

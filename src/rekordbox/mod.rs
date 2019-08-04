@@ -26,6 +26,7 @@ mod db_message_argument;
 mod metadata_type;
 mod rpc;
 mod db_codec;
+mod status_event_server;
 
 // tests
 #[cfg(test)]
