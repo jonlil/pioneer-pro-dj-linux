@@ -66,7 +66,10 @@ impl StatusEventServer {
             match self.recv_from() {
                 Ok((data, peer)) => {
                     if let Some(response) = self.process_packet(data) {
-                        self.send_to((response, peer));
+                        match self.send_to((response, peer)) {
+                            Ok(_) => {},
+                            Err(err) => eprintln!("Failed sending status packet: {:?}", err),
+                        };
                     }
                 },
                 Err(_err) => {},

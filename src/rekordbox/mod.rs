@@ -27,6 +27,7 @@ mod metadata_type;
 mod rpc;
 mod db_codec;
 mod status_event_server;
+mod keepalive;
 
 // tests
 #[cfg(test)]

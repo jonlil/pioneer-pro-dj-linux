@@ -64,6 +64,13 @@ impl<'a> DiscoveryInitial<'a> {
     }
 }
 
+impl<'a> From<DiscoveryInitial<'a>> for Bytes {
+    fn from(packet: DiscoveryInitial) -> Bytes {
+        let data: Vec<u8> = packet.into();
+        Bytes::from(data)
+    }
+}
+
 impl<'a> ComposeRekordboxMessage for DiscoveryInitial<'a> {
     fn compose(&self) -> Vec<RekordboxMessageType> {
         vec![
@@ -75,6 +82,7 @@ impl<'a> ComposeRekordboxMessage for DiscoveryInitial<'a> {
         ]
     }
 }
+
 impl<'a> Into<RekordboxMessageType> for DiscoveryInitial<'a> {
     fn into(self) -> RekordboxMessageType {
         self.compose().into_iter().flatten().collect()

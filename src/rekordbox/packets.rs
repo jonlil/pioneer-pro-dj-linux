@@ -143,7 +143,7 @@ impl TryFrom<Bytes> for DBMessage {
     fn try_from(message: Bytes) -> Result<Self, Self::Error> {
         match DBMessage::parse(&message) {
             Ok((_input, message)) => Ok(message),
-            Err(err) => Err("Failed decoding DBMessage."),
+            Err(_err) => Err("Failed decoding DBMessage."),
         }
     }
 }
@@ -160,7 +160,7 @@ impl From<ManyDBMessages> for Bytes {
 const UDP_MAGIC: [u8; 10] = [0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c];
 
 
-pub mod TermDj {
+pub mod term_dj {
     use bytes::Bytes;
 
     const APPLICATION_NAME: &str = "TermDJ";
@@ -174,7 +174,6 @@ pub mod TermDj {
                 .collect::<Bytes>())
         }
     }
-
 }
 
 #[derive(Debug, PartialEq)]
@@ -183,7 +182,7 @@ pub struct ModelName(String);
 impl ModelName {
     pub fn new(name: String) -> ModelName { ModelName(name) }
 
-    fn decode(input: &[u8]) -> IResult<&[u8], ModelName> {
+    pub fn decode(input: &[u8]) -> IResult<&[u8], ModelName> {
         let (input, model) = take(20u8)(input)?;
 
         match String::from_utf8(model.to_vec()) {
@@ -192,7 +191,7 @@ impl ModelName {
         }
     }
 
-    fn encode(self) -> Bytes {
+    pub fn encode(self) -> Bytes {
         let mut model = self.0.as_bytes().to_vec();
         let padding = 20 - model.len();
         if padding > 0 {
@@ -248,10 +247,10 @@ impl From<PlayerSlot> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
-struct UdpMagic;
+pub struct UdpMagic;
 
 impl UdpMagic {
-    fn decode(input: &[u8]) -> IResult<&[u8], UdpMagic> {
+    pub fn decode(input: &[u8]) -> IResult<&[u8], UdpMagic> {
         let (input, _) = tag(UDP_MAGIC)(input)?;
         Ok((input, UdpMagic))
     }
@@ -696,59 +695,6 @@ impl From<RekordboxReply> for Bytes {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum KeepAlivePacketType {
-    Hello,
-    Number,
-    Mac,
-    Ip,
-    Status,
-    Change,
-    Unknown(u8),
-}
-
-impl KeepAlivePacketType {
-    fn decode(input: &[u8]) -> IResult<&[u8], KeepAlivePacketType> {
-        let (input, kind) = take(1u8)(input)?;
-
-        Ok((input, match kind[0] {
-            0x25 => KeepAlivePacketType::Hello,
-            0x26 => KeepAlivePacketType::Number,
-            0x2c => KeepAlivePacketType::Mac,
-            0x32 => KeepAlivePacketType::Ip,
-            0x36 => KeepAlivePacketType::Status,
-            0x29 => KeepAlivePacketType::Change,
-            _    => KeepAlivePacketType::Unknown(kind[0]),
-        }))
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct KeepAlivePacket {
-    kind: KeepAlivePacketType,
-}
-
-impl KeepAlivePacket {
-    fn decode(input: &[u8]) -> IResult<&[u8], KeepAlivePacket> {
-
-        let (input, kind) = KeepAlivePacketType::decode(input)?;
-
-        Ok((input, KeepAlivePacket {
-            kind,
-        }))
-    }
-}
-
-impl TryFrom<Bytes> for KeepAlivePacket {
-    type Error = &'static str;
-
-    fn try_from(message: Bytes) -> Result<Self, Self::Error> {
-        match KeepAlivePacket::decode(&message) {
-            Ok((_input, message)) => Ok(message),
-            Err(err) => Err("Failed decoding KeepAlivePacket."),
-        }
-    }
-}
 
 #[cfg(test)]
 mod test {

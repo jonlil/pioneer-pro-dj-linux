@@ -15,6 +15,7 @@ use crate::rpc::server::{RpcServer};
 use super::rpc::EventHandler as RpcEventHandler;
 use super::library::DBLibraryServer;
 use super::state::{LockedClientState, ClientState};
+use super::keepalive::{KeepAliveServer, KeepAliveServerOptions};
 
 #[derive(Debug)]
 pub enum Error {
@@ -60,17 +61,17 @@ impl Client {
         random_broadcast_socket(&address, Message::ApplicationBroadcast::new(&address).into());
     }
 
-    fn broadcast_handler(socket: UdpSocket, tx: &Sender<Event>) -> JoinHandle<()> {
+    fn broadcast_handler(tx: &Sender<Event>) -> JoinHandle<()> {
         let tx = tx.clone();
 
-        thread::spawn(move || loop {
-            let mut buffer = [0u8; 512];
-            match socket.recv_from(&mut buffer) {
-                Ok(socket_metadata) => Self::event_parser(&buffer, socket_metadata, &tx),
-                Err(_) => (),
-            }
-            thread::sleep(Duration::from_millis(250));
-        })
+        match KeepAliveServer::bind(KeepAliveServerOptions::default()) {
+            Ok(server) => {
+                thread::spawn(move || {
+                    server.run();
+                })
+            },
+            Err(_) => panic!("Failed starting keepalive server"),
+        }
     }
 
     fn broadcast_sender_handler(state_ref: LockedClientState) -> JoinHandle<Event> {
@@ -204,11 +205,6 @@ impl Client {
     pub fn run<T: EventHandler>(&mut self, handler: &T) -> Result<(), Error> {
         let (tx, rx) = mpsc::channel::<Event>();
 
-        let socket = UdpSocket::bind(("0.0.0.0", 50000))
-            .map_err(|err| Error::Socket(format!("{}", err)))?;
-        socket.set_broadcast(true)
-            .map_err(|err| Error::Generic(format!("{}", err)))?;
-
         // Non-blocking thread safe UdpSocket
         // TODO: Implement poison management
         let message_socket = UdpSocket::bind(("0.0.0.0", 50002))
@@ -216,7 +212,7 @@ impl Client {
         message_socket.set_nonblocking(true).unwrap();
         let message_socket_ref: LockedUdpSocket = Arc::new(Mutex::new(message_socket));
 
-        let _broadcast_handler = Self::broadcast_handler(socket, &tx);
+        let _broadcast_handler = Self::broadcast_handler(&tx);
         // This broadcast handler announce this applications presence on the network.
         let _broadcast_sender_handler = Self::broadcast_sender_handler(self.state());
 
