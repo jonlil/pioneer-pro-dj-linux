@@ -651,4 +651,37 @@ mod test {
         assert_eq!(Bytes::from(message::DiscoverySequence::new(&network, 3, 1)), Bytes::from(build_keepalive_packet(17, 3)));
         assert_eq!(Bytes::from(message::DiscoverySequence::new(&network, 3, 3)), Bytes::from(build_keepalive_packet(41, 3)));
     }
+
+    #[test]
+    fn test_keepalive_status_packet() {
+        let address = get_pioneer_network();
+        let data: Vec<u8> = message::ApplicationBroadcast::new(&address).into();
+        let packet = Bytes::from(data);
+
+        assert_eq!(Ok(
+            (
+                &[0x08][..],
+                KeepAlivePacket {
+                    kind: KeepAlivePacketType::Status,
+                    subkind: KeepAlivePacketSubType::Status,
+                    model: ModelName::new(
+                        "Linux".to_string(),
+                    ),
+                    unknown1: 1,
+                    device_type: DeviceType::Rekordbox,
+                    content: KeepAliveContentType::Status(
+                        Status {
+                            player_number: 17,
+                            unknown2: 1,
+                            ip_addr: Ipv4Addr::new(192, 168, 10, 50),
+                            mac_addr: MacAddr::from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+                            device_count: 1,
+                            unknown3: 4,
+                        },
+                    ),
+                }
+            )),
+            KeepAlivePacket::decode(&packet),
+        );
+    }
 }
