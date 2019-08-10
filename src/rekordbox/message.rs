@@ -95,6 +95,13 @@ pub struct DiscoverySequence<'a> {
     index: i32,
 }
 
+impl<'a> From<DiscoverySequence<'a>> for Bytes {
+    fn from(packet: DiscoverySequence) -> Bytes {
+        let data: Vec<u8> = packet.into();
+        Bytes::from(data)
+    }
+}
+
 impl<'a> DiscoverySequence<'a> {
     pub fn new(network: &'a PioneerNetwork, sequence: u8, index: i32) -> Self {
         Self { network: network, sequence: sequence, index: index }

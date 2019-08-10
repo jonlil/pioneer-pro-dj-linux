@@ -620,4 +620,35 @@ mod test {
             }
         ));
     }
+
+    #[test]
+    fn test_ip_iteration() {
+        let network = get_pioneer_network();
+
+        fn build_keepalive_packet(player_number: u8, iteration: u8) -> KeepAlivePacket {
+            KeepAlivePacket {
+                kind: KeepAlivePacketType::Ip,
+                subkind: KeepAlivePacketSubType::Ip,
+                model: ModelName::new("Linux".to_string()),
+                unknown1: 1,
+                device_type: DeviceType::Rekordbox,
+                content: KeepAliveContentType::Ip(
+                    Ip {
+                        ip_addr: Ipv4Addr::new(192, 168, 10, 50),
+                        mac_addr: MacAddr::from([0xff, 0xff, 0xff, 0xff, 0xff, 0xff]),
+                        player_number: player_number,
+                        iteration: iteration,
+                        unknown2: 4,
+                        player_number_assignment: PlayerNumberAssignment::Auto,
+                    },
+                ),
+            }
+        }
+
+        assert_eq!(Bytes::from(message::DiscoverySequence::new(&network, 1, 1)), Bytes::from(build_keepalive_packet(17, 1)));
+        assert_eq!(Bytes::from(message::DiscoverySequence::new(&network, 2, 1)), Bytes::from(build_keepalive_packet(17, 2)));
+        assert_eq!(Bytes::from(message::DiscoverySequence::new(&network, 2, 2)), Bytes::from(build_keepalive_packet(18, 2)));
+        assert_eq!(Bytes::from(message::DiscoverySequence::new(&network, 3, 1)), Bytes::from(build_keepalive_packet(17, 3)));
+        assert_eq!(Bytes::from(message::DiscoverySequence::new(&network, 3, 3)), Bytes::from(build_keepalive_packet(41, 3)));
+    }
 }
