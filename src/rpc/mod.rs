@@ -15,13 +15,14 @@ pub mod events {
         RpcReplyMessage,
         RpcCall,
     };
-    use std::io::{Error, ErrorKind};
 
     pub trait EventHandler: Send + Sync + 'static {
-        fn on_event(&self, procedure: RpcProcedure, call: RpcCall) -> Result<RpcReplyMessage, std::io::Error>;
+        fn on_event(&self, procedure: &RpcProcedure, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error>;
 
         fn handle_event(&self, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
-            Err(Error::new(ErrorKind::InvalidInput, "failed"))
+            self.on_event(call.procedure(), call)
         }
     }
 }
+
+pub use server::PortmapServer;

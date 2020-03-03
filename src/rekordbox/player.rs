@@ -1,32 +1,21 @@
-use std::net::{IpAddr, UdpSocket, TcpStream};
+use std::net::{Ipv4Addr};
 use std::ops::Index;
-use std::io::{self, Read};
-use crate::rekordbox::message as Message;
-use std::thread;
-use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct Player {
     model: String,
-    address: IpAddr,
+    address: Ipv4Addr,
     number: u8,
     linking: bool,
 }
 
 impl Player {
-    pub fn new(model: String, number: u8, address: IpAddr) -> Self {
+    pub fn new(model: String, number: u8, address: Ipv4Addr) -> Self {
         Self { model: model, number: number, address: address, linking: false }
     }
 
-    pub fn address(&self) -> IpAddr {
+    pub fn address(&self) -> Ipv4Addr {
         self.address
-    }
-
-    pub fn link(&mut self, socket: &UdpSocket) -> Result<(usize), io::Error> {
-        let data: Vec<u8> = Message::ApplicationLinkRequest::new().into();
-        self.linking = true;
-        self.connect_library();
-        socket.send_to(data.as_ref(), (self.address, 50002))
     }
 
     pub fn is_linking(&self) -> bool {
@@ -35,29 +24,6 @@ impl Player {
 
     pub fn set_linking(&mut self, val: bool) {
         self.linking = val;
-    }
-
-    pub fn connect_library(&mut self) {
-        let address = self.address.clone();
-        thread::spawn(move || {
-            let mut stream = TcpStream::connect((address, 12523)).unwrap();
-
-            loop {
-                let mut buffer = [0; 1024];
-                match stream.read(&mut buffer) {
-                    Ok(number_of_bytes) => {
-                        eprintln!(
-                            "Received TCP Package: {:?}",
-                            String::from_utf8_lossy(&buffer[..number_of_bytes])
-                        );
-                    },
-                    Err(err) => eprintln!("TCPError: {:?}", err),
-                }
-
-                thread::sleep(Duration::from_millis(500));
-            }
-        });
-
     }
 }
 
@@ -91,7 +57,7 @@ impl PlayerCollection {
         self.players.push(player);
     }
 
-    pub fn get_mut(&mut self, address: &IpAddr) -> Option<&mut Player> {
+    pub fn get_mut(&mut self, address: &Ipv4Addr) -> Option<&mut Player> {
         self.players.iter_mut().find(|p| p.address == *address)
     }
 
@@ -143,7 +109,7 @@ impl Index<usize> for PlayerCollection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, IpAddr};
+    use std::net::{Ipv4Addr};
 
     #[test]
     fn it_support_pushing() {
@@ -151,7 +117,7 @@ mod tests {
         players.push(Player {
             linking: false,
             number: 0x01,
-            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
+            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x01),
             model: String::from("XDJ-700")
         });
 
@@ -164,7 +130,7 @@ mod tests {
         players.push(Player {
             linking: false,
             number: 0x01,
-            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
+            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x01),
             model: String::from("XDJ-700")
         });
         assert_eq!(players[0].number, 0x01);
@@ -172,7 +138,7 @@ mod tests {
         players.add_or_update(Player {
             linking: false,
             number: 0x02,
-            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
+            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x01),
             model: String::from("XDJ-700")
         });
         assert_eq!(players.len(), 1);
@@ -181,7 +147,7 @@ mod tests {
         players.add_or_update(Player {
             linking: true,
             number: 0x02,
-            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x01)),
+            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x01),
             model: String::from("XDJ-700")
         });
         assert_eq!(players.len(), 1);
@@ -190,7 +156,7 @@ mod tests {
         players.add_or_update(Player {
             linking: false,
             number: 0x03,
-            address: IpAddr::V4(Ipv4Addr::new(0x01, 0x00, 0x00, 0x05)),
+            address: Ipv4Addr::new(0x01, 0x00, 0x00, 0x05),
             model: String::from("XDJ-700")
         });
         assert_eq!(players.len(), 2);

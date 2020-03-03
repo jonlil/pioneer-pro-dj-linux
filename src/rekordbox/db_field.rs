@@ -76,12 +76,12 @@ impl DBField {
     pub fn new(kind: DBFieldType, value: &[u8]) -> Self {
         Self {
             kind,
-            value: Bytes::from(value),
+            value: Bytes::from(value.to_vec()),
         }
     }
 
     pub fn as_bytes(&self) -> Bytes {
-        let mut buffer = Bytes::from(vec![]);
+        let mut buffer = BytesMut::new();
 
         match self.kind {
             DBFieldType::String => {
@@ -103,7 +103,7 @@ impl DBField {
             }
         };
 
-        buffer
+        buffer.freeze()
     }
 }
 
@@ -220,7 +220,8 @@ mod test {
             value: fixture.clone(),
         });
 
-        let mut expected_value = BytesMut::from(vec![0x14, 0x00, 0x00, 0x00, 0x38]);
+        let mut expected_value = BytesMut::new();
+        expected_value.extend(vec![0x14, 0x00, 0x00, 0x00, 0x38]);
         expected_value.extend(fixture);
         assert_eq!(
             expected_value,

@@ -1,6 +1,6 @@
 use bytes::{Bytes, BytesMut, BufMut};
-use tokio::codec::{Encoder, Decoder};
-use super::packets::{RpcMessage};
+use tokio_util::codec::{Encoder, Decoder};
+use super::packets::RpcMessage;
 use std::io::{Error, ErrorKind};
 use std::convert::TryFrom;
 

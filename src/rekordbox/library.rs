@@ -1,34 +1,26 @@
-extern crate bytes;
-extern crate futures;
-
 use bytes::{Bytes, BytesMut};
-use futures::{Future, Async, Poll};
-use std::net::{SocketAddr, Ipv4Addr, IpAddr};
-use std::io::{Read, Write, self, Error, ErrorKind};
-use std::thread;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{read_exact, write_all};
-use tokio::codec::{BytesCodec, Decoder};
-use tokio::prelude::*;
+use std::net::{SocketAddr};
+use std::sync::{Arc, Mutex};
+use tokio::net::TcpListener;
+use tokio::stream::StreamExt;
+use tokio_util::codec::{Framed, BytesCodec};
+use futures::SinkExt;
 
-
-use super::packets::DBMessage;
+use super::packets::{DBMessage, ManyDBMessages};
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
 use super::metadata_type;
-use super::state::{
-    LockedClientState as LockedSharedState,
-    ClientState as SharedState,
-};
+use crate::rekordbox::ServerState;
+use crate::utils::network::random_ipv4_socket_address;
 
 struct ClientState {
     previous_request: Option<DBRequestType>,
-    state: LockedSharedState,
+    state: Arc<Mutex<ServerState>>,
 }
 
 impl ClientState {
-    pub fn new(state: LockedSharedState) -> Self {
+    pub fn new(state: Arc<Mutex<ServerState>>) -> Self {
         Self {
             previous_request: None,
             state: state,
@@ -36,40 +28,9 @@ impl ClientState {
     }
 }
 
-pub fn client_response(mut stream: TcpStream, data: Bytes) {
-    if let Err(e) = stream.write(data.as_ref()) {
-        eprintln!("Failed responding to client: {:?}", e);
-    }
-}
-
 pub enum Event {
     RemoteDBServer,
     Unsupported,
-}
-
-pub fn get_package_type(buffer: &[u8]) -> Event {
-    match buffer {
-         &[0, 0, 0, 15, 82, 101, 109, 111, 116, 101, 68, 66, 83, 101, 114, 118, 101, 114, 0] => Event::RemoteDBServer,
-         _ => {
-             Event::Unsupported
-         }
-    }
-}
-
-pub fn handle_client(mut stream: TcpStream) {
-    let mut buf = [0u8; 64];
-    match stream.read(&mut buf) {
-        Ok(size) => {
-            match get_package_type(&buf[..size]) {
-                Event::RemoteDBServer => client_response(
-                    stream,
-                    Bytes::from(vec![0xff, 0x20]),
-                ),
-                Event::Unsupported => {},
-            }
-        },
-        Err(err) => eprintln!("{:?}", err),
-    }
 }
 
 trait Controller {
@@ -92,13 +53,13 @@ impl RequestWrapper {
 
 struct RequestHandler<'a> {
     request: RequestWrapper,
-    controller: Box<Controller>,
+    controller: Box<dyn Controller>,
     context: &'a mut ClientState,
 }
 
 impl <'a>RequestHandler<'a> {
     pub fn new(
-        request_handler: Box<Controller>,
+        request_handler: Box<dyn Controller>,
         message: DBMessage,
         context: &'a mut ClientState
     ) -> RequestHandler<'a> {
@@ -304,9 +265,7 @@ impl Controller for PreviewWaveformController {
 struct TitleController;
 impl Controller for TitleController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
-        let mut bytes: BytesMut = request.to_response();
-
-        Bytes::from(bytes)
+        request.to_response().freeze()
     }
 }
 
@@ -383,102 +342,109 @@ fn build_message_footer(transaction_id: &DBField) -> DBMessage {
 
 struct RenderController;
 impl RenderController {
-    fn render_root_menu(&self, request: RequestWrapper, mut response: Response, context: &ClientState) -> Response {
+    fn render_root_menu(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id.clone();
+        let mut response = ManyDBMessages::new(vec![
+            build_message_header(&transaction_id),
+        ]);
 
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend_items(vec![
-                // MenuName, MetadataType, MenuId
-                ("\u{fffa}ARTIST\u{fffb}", metadata_type::ROOT_ARTIST, 0x02, 0x12),
-                ("\u{fffa}ALBUM\u{fffb}", metadata_type::ROOT_ALBUM, 0x03, 0x10),
-                ("\u{fffa}TRACK\u{fffb}", metadata_type::ROOT_TRACK, 0x04, 0x10),
-                ("\u{fffa}KEY\u{fffb}", metadata_type::ROOT_KEY, 0x0c, 0x0c),
-                ("\u{fffa}PLAYLIST\u{fffb}", metadata_type::ROOT_PLAYLIST, 0x05, 0x16),
-                ("\u{fffa}HISTORY\u{fffb}", metadata_type::ROOT_HISTORY, 0x16, 0x14),
-                ("\u{fffa}SEARCH\u{fffb}", metadata_type::ROOT_SEARCH, 0x12, 0x12),
-            ].iter().map(|item| {
-                Bytes::from(build_message_item(&transaction_id, (
-                    DBField::from(item.0),
-                    item.1,
-                    item.2,
-                    item.3,
-                    0x00,
-                )))
-            }).collect());
-        response.extend(Bytes::from(build_message_footer(&transaction_id)));
+        response.extend(vec![
+            // MenuName, MetadataType, MenuId
+            ("\u{fffa}ARTIST\u{fffb}", metadata_type::ROOT_ARTIST, 0x02, 0x12),
+            ("\u{fffa}ALBUM\u{fffb}", metadata_type::ROOT_ALBUM, 0x03, 0x10),
+            ("\u{fffa}TRACK\u{fffb}", metadata_type::ROOT_TRACK, 0x04, 0x10),
+            ("\u{fffa}KEY\u{fffb}", metadata_type::ROOT_KEY, 0x0c, 0x0c),
+            ("\u{fffa}PLAYLIST\u{fffb}", metadata_type::ROOT_PLAYLIST, 0x05, 0x16),
+            ("\u{fffa}HISTORY\u{fffb}", metadata_type::ROOT_HISTORY, 0x16, 0x14),
+            ("\u{fffa}SEARCH\u{fffb}", metadata_type::ROOT_SEARCH, 0x12, 0x12),
+        ].iter().map(|item| {
+            build_message_item(&transaction_id, (
+                DBField::from(item.0),
+                item.1,
+                item.2,
+                item.3,
+                0x00,
+            ))
+        }).collect());
+        response.push(build_message_footer(&transaction_id));
 
         response
     }
 
-    fn render_artist_page(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+    fn render_artist_page(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
-
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend_items(vec![
-            Bytes::from(build_message_item(&transaction_id, (
-                DBField::from("Loopmasters"),
-                metadata_type::ARTIST,
-                0x01,
-                0x18,
-                0x00,
-            )))
+        let mut response = ManyDBMessages::new(vec![
+            build_message_header(&transaction_id),
         ]);
-        response.extend(Bytes::from(DBMessage::new(
+
+        response.push(build_message_item(&transaction_id, (
+            DBField::from("Loopmasters"),
+            metadata_type::ARTIST,
+            0x01,
+            0x18,
+            0x00,
+        )));
+
+        response.push(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
             ArgumentCollection::new(vec![]),
-        )));
+        ));
 
         response
     }
 
-    fn render_title_page(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+    fn render_title_page(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
 
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend_items(vec![
-            Bytes::from(build_message_item(&transaction_id, (
-                DBField::from("Loopmasters"),
-                metadata_type::TITLE,
-                0x05,
-                0x1a,
-                0x00
-            )))
+        let mut response = ManyDBMessages::new(vec![
+            build_message_header(&transaction_id),
         ]);
-        response.extend(Bytes::from(DBMessage::new(
+        response.push(build_message_item(&transaction_id, (
+            DBField::from("Loopmasters"),
+            metadata_type::TITLE,
+            0x05,
+            0x1a,
+            0x00
+        )));
+        response.push(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
             ArgumentCollection::new(vec![]),
-        )));
+        ));
 
         response
     }
 
-    fn render_album_by_artist(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+    fn render_album_by_artist(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
-
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend_items(vec![
-            Bytes::from(build_message_item(&transaction_id, (
-                DBField::from("Unknown"),
-                metadata_type::ALBUM,
-                0x00,
-                0x10,
-                0x00,
-            )))
+        let mut response = ManyDBMessages::new(vec![
+            build_message_header(&transaction_id),
         ]);
-        response.extend(Bytes::from(DBMessage::new(
+
+        response.push(build_message_item(&transaction_id, (
+            DBField::from("Unknown"),
+            metadata_type::ALBUM,
+            0x00,
+            0x10,
+            0x00,
+        )));
+
+        response.push(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
             ArgumentCollection::new(vec![]),
-        )));
+        ));
+
         response
     }
 
-    fn render_title_by_artist_album(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+    fn render_title_by_artist_album(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
+        let mut response = ManyDBMessages::new(vec![
+            build_message_header(&transaction_id),
+        ]);
 
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
         let mut items: Vec<(&str, u8, u8)> = vec![("Demo Track 1", 0x05, 0x1a)];
 
         // This seems to be related to only query one MenuItem
@@ -486,29 +452,30 @@ impl RenderController {
             items.extend(vec![("Demo Track 2", 0x06, 0x1a)]);
         }
 
-        response.extend_items(items.iter().map(|item| {
-            Bytes::from(build_message_item(&transaction_id, (
+        response.extend(items.iter().map(|item| {
+            build_message_item(&transaction_id, (
                 DBField::from(item.0),
                 metadata_type::TITLE,
                 item.1,
                 item.2,
                 0x00
-            )))
+            ))
         }).collect());
 
-        response.extend(Bytes::from(DBMessage::new(
+        response.push(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
             ArgumentCollection::new(vec![]),
-        )));
+        ));
+
         response
     }
 
-    fn render_metadata(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+    fn render_metadata(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
 
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend(Bytes::from(
+        ManyDBMessages::new(vec![
+            build_message_header(&transaction_id),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -526,9 +493,7 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x01, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ]),
-            )
-        ));
-        response.extend(Bytes::from(
+            ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -546,9 +511,7 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
-            )
-        ));
-        response.extend(Bytes::from(
+            ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -567,8 +530,6 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ]),
             ),
-        ));
-        response.extend(Bytes::from(
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -587,8 +548,6 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
             ),
-        ));
-        response.extend(Bytes::from(
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -607,8 +566,6 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
             ),
-        ));
-        response.extend(Bytes::from(
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -627,8 +584,6 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
             ),
-        ));
-        response.extend(Bytes::from(
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -647,8 +602,6 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
             ),
-        ));
-        response.extend(Bytes::from(
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -667,8 +620,6 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
             ),
-        ));
-        response.extend(Bytes::from(
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -687,8 +638,6 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
             ),
-        ));
-        response.extend(Bytes::from(
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
@@ -707,217 +656,199 @@ impl RenderController {
                     DBField::from([0x00, 0x00, 0x00, 0x00]),
                 ])
             ),
-        ));
-        response.extend(Bytes::from(DBMessage::new(
-            transaction_id,
-            DBRequestType::MenuFooter,
-            ArgumentCollection::new(vec![]),
-        )));
-
-        response
+            DBMessage::new(
+                transaction_id,
+                DBRequestType::MenuFooter,
+                ArgumentCollection::new(vec![]),
+            ),
+        ])
     }
 
-    fn render_mount_info(&self, request: RequestWrapper, mut response: Response, _context: &ClientState) -> Response {
+    fn render_mount_info(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
 
-        response.extend(Bytes::from(build_message_header(&transaction_id)));
-        response.extend(Bytes::from(
-            DBMessage::new(
-                transaction_id.clone(),
-                DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x01]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::TITLE),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x01, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
-            ),
-        ));
-        response.extend(Bytes::from(
-            DBMessage::new(
-                transaction_id.clone(),
-                DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0xac]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::DURATION),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
-            ),
-        ));
-        response.extend(Bytes::from(
-            DBMessage::new(
-                transaction_id.clone(),
-                DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x32, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::BPM),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
-            ),
-        ));
-        response.extend(Bytes::from(
-            DBMessage::new(
-                transaction_id.clone(),
-                DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x3c]),
-                    DBField::from("Tracks by www.loopmasters.com"),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::COMMENT),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ]),
-            ),
-        ));
-        response.extend(Bytes::from(
-            DBMessage::new(
-                transaction_id.clone(),
-                DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x69, 0x47, 0xa8]),
-                    DBField::from([0x00, 0x00, 0x00, 0x05]),
-                    DBField::from([0x00, 0x00, 0x00, 0x7a]),
-                    DBField::from("C:/Users/Snaajf/Music/PioneerDJ/Demo Tracks/Demo Track 1.mp3"),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
-            ),
+        let mut resp = ManyDBMessages::new(vec![
+            build_message_header(&transaction_id),
+        ]);
+
+        resp.push(DBMessage::new(
+            transaction_id.clone(),
+            DBRequestType::MenuItem,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x01]),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from(metadata_type::TITLE),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x01, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+            ])
         ));
 
-        response.extend(Bytes::from(
-            DBMessage::new(
-                transaction_id.clone(),
-                DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x01]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x2f]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
-            ),
+        resp.push(DBMessage::new(
+            transaction_id.clone(),
+            DBRequestType::MenuItem,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0xac]),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from(metadata_type::DURATION),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+            ])
+        ));
+        resp.push(DBMessage::new(
+            transaction_id.clone(),
+            DBRequestType::MenuItem,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x32, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from(metadata_type::BPM),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+            ])
+        ));
+        resp.push(DBMessage::new(
+            transaction_id.clone(),
+            DBRequestType::MenuItem,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x3c]),
+                DBField::from("Tracks by www.loopmasters.com"),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from(metadata_type::COMMENT),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+            ]),
+        ));
+        resp.push(DBMessage::new(
+            transaction_id.clone(),
+            DBRequestType::MenuItem,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x69, 0x47, 0xa8]),
+                DBField::from([0x00, 0x00, 0x00, 0x05]),
+                DBField::from([0x00, 0x00, 0x00, 0x7a]),
+                DBField::from("C:/Users/Snaajf/Music/PioneerDJ/Demo Tracks/Demo Track 1.mp3"),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+            ])
         ));
 
-        response.extend(Bytes::from(DBMessage::new(
+        resp.push(DBMessage::new(
+            transaction_id.clone(),
+            DBRequestType::MenuItem,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x01]),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from([0x00, 0x00, 0x00, 0x02]),
+                DBField::from(""),
+                DBField::from([0x00, 0x00, 0x00, 0x2f]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+                DBField::from([0x00, 0x00, 0x00, 0x00]),
+            ])
+        ));
+
+        resp.push(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
             ArgumentCollection::new(vec![]),
-        )));
+        ));
 
-        response
+        resp
     }
 }
 
 struct QueryMountInfoController;
 impl Controller for QueryMountInfoController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
-        let request_type = request.message.request_type;
-        let mut bytes: BytesMut = request.to_response();
-        let request_type_value = request_type.value();
+        let request_type_value = request.message.request_type.value();
         let items_to_render: u32 = 6u32;
 
-        bytes.extend(ok_request());
-        bytes.extend(Bytes::from(
+        Bytes::from(DBMessage::new(
+            request.message.transaction_id,
+            DBRequestType::Success,
             ArgumentCollection::new(vec![
                 DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
                 DBField::from(items_to_render),
             ]),
-        ));
-
-        Bytes::from(bytes)
+        ))
     }
 }
 
 struct TitleByArtistAlbumController;
 impl Controller for TitleByArtistAlbumController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
-        let request_type = request.message.request_type;
-        let mut bytes: BytesMut = request.to_response();
-        let request_type_value = request_type.value();
+        let request_type_value = request.message.request_type.value();
 
-        bytes.extend(Bytes::from(DBField::from([0x40, 0x00])));
-        // TODO: Implement std::iter::Extend for BytesMut
-        // bytes.extend(ArgumentCollection::new(vec![]));
-        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
-            DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
-            DBField::from(2u32),
-        ])));
-
-        Bytes::from(bytes)
+        Bytes::from(DBMessage::new(
+            request.message.transaction_id,
+            DBRequestType::Success,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
+                DBField::from(2u32),
+            ])
+        ))
     }
 }
 
 struct MetadataController;
 impl Controller for MetadataController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
-        let request_type = request.message.request_type;
-        let mut bytes: BytesMut = request.to_response();
-        let request_type_value = request_type.value();
+        let request_type_value = request.message.request_type.value();
 
-        bytes.extend(Bytes::from(DBField::from([0x40, 0x00])));
-        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
-            DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
-            DBField::from(10u32),
-        ])));
-
-        Bytes::from(bytes)
+        Bytes::from(DBMessage::new(
+            request.message.transaction_id,
+            DBRequestType::Success,
+            ArgumentCollection::new(vec![
+                DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
+                DBField::from(10u32),
+            ]),
+        ))
     }
 }
 
 struct LoadTrackController;
 impl Controller for LoadTrackController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
-        let request_type = request.message.request_type;
-        let mut bytes: BytesMut = request.to_response();
-        let request_type_value = request_type.value();
+        let request_type_value = request.message.request_type.value();
 
-        bytes.extend(Bytes::from(DBField::from([0x4e, 0x02])));
-        bytes.extend(Bytes::from(
+        Bytes::from(DBMessage::new(
+            request.message.transaction_id,
+            DBRequestType::LoadTrackSuccess,
             ArgumentCollection::new(vec![
                 DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
                 DBField::from(1u32),
@@ -925,25 +856,21 @@ impl Controller for LoadTrackController {
                 DBField::new(DBFieldType::Binary, &[]),
                 DBField::from(0u32),
             ]),
-        ));
-
-        Bytes::from(bytes)
+        ))
     }
 }
 
 impl Controller for RenderController {
     fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes {
-        let response = Response::new();
-
         Bytes::from(match context.previous_request {
-            Some(DBRequestType::RootMenuRequest) => self.render_root_menu(request, response, context),
-            Some(DBRequestType::ArtistRequest) => self.render_artist_page(request, response, context),
-            Some(DBRequestType::TitleRequest) => self.render_title_page(request, response, context),
-            Some(DBRequestType::AlbumByArtistRequest) => self.render_album_by_artist(request, response, context),
-            Some(DBRequestType::TitleByArtistAlbumRequest) => self.render_title_by_artist_album(request, response, context),
-            Some(DBRequestType::MetadataRequest) => self.render_metadata(request, response, context),
-            Some(DBRequestType::MountInfoRequest) => self.render_mount_info(request, response, context),
-            _ => Response { buffer: BytesMut::new() },
+            Some(DBRequestType::RootMenuRequest) => self.render_root_menu(request, context),
+            Some(DBRequestType::ArtistRequest) => self.render_artist_page(request, context),
+            Some(DBRequestType::TitleRequest) => self.render_title_page(request, context),
+            Some(DBRequestType::AlbumByArtistRequest) => self.render_album_by_artist(request, context),
+            Some(DBRequestType::TitleByArtistAlbumRequest) => self.render_title_by_artist_album(request, context),
+            Some(DBRequestType::MetadataRequest) => self.render_metadata(request, context),
+            Some(DBRequestType::MountInfoRequest) => self.render_mount_info(request, context),
+            _ => ManyDBMessages::new(vec![]),
         })
     }
 }
@@ -968,8 +895,9 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
 fn process(
     bytes: Bytes,
     context: &mut ClientState,
-    peer_addr: &SocketAddr,
+    _peer: &SocketAddr,
 ) -> Bytes {
+    // TODO: Before implementing DbBytesCodec this must be migrated.
     if bytes.len() == 5 {
         return Bytes::from(bytes);
     }
@@ -1009,106 +937,84 @@ fn process(
     Bytes::from("Failed processing request into response")
 }
 
-/// Handle library clients
-struct LibraryClientHandler;
-impl LibraryClientHandler {
-    fn spawn(address: SocketAddr, state: LockedSharedState) -> Result<u16, io::Error> {
-        let listener = TcpListener::bind(&address)?;
-        let local_addr = listener.local_addr()?;
+async fn spawn_library_client_handler(mut listener: TcpListener, state: &Arc<Mutex<ServerState>>) {
+    match listener.accept().await {
+        Ok((remote_client, address)) => {
+            let mut remote_client = Framed::new(remote_client, BytesCodec::new());
+            let mut context = ClientState::new(state.clone());
 
-        thread::spawn(move || {
-            let done = listener
-                .incoming()
-                .map_err(|err| eprintln!("Failed to accept socket; error = {:?}", err))
-                .for_each(move |socket| {
-                    let peer_addr = socket.peer_addr().unwrap();
-                    let framed = BytesCodec::new().framed(socket);
-                    let (writer, reader) = framed.split();
-                    let mut context = ClientState::new(state.clone());
-
-                    let responses = reader.map(move |bytes| {
-                        process(Bytes::from(bytes), &mut context, &peer_addr)
-                    });
-
-                    let writes = responses.fold(writer, |writer, response| {
-                        writer.send(response)
-                    });
-
-                    let processor = writes.then(move |_w| Ok(()));
-
-                    tokio::spawn(processor)
-                });
-
-            tokio::run(done);
-        });
-
-        Ok(local_addr.port())
+            while let Some(result) = remote_client.next().await {
+                match result {
+                    Ok(data) => {
+                        match remote_client.send(process(Bytes::from(data), &mut context, &address)).await {
+                            Ok(_) => {},
+                            Err(err) => eprintln!("failed sending library query response; error = {}", err),
+                        }
+                    },
+                    Err(err) => eprintln!("library client handler got error; error = {}", err),
+                }
+            }
+        },
+        Err(err) => eprintln!("failed reading connection on socket; error = {}", err),
     }
 }
 
 pub struct DBLibraryServer;
 impl DBLibraryServer {
-    fn spawn(address: &str, state: LockedSharedState) {
+    async fn spawn(address: &str, state: Arc<Mutex<ServerState>>) -> Result<(), std::io::Error> {
         let addr = address.parse::<SocketAddr>().unwrap();
-        let listener = TcpListener::bind(&addr).unwrap();
-        let done = listener
-            .incoming()
-            .map_err(|e| println!("failed to accept socket; error = {:?}", e))
-            .for_each(move |socket| {
-                let state = state.clone();
+        let mut listener = TcpListener::bind(&addr).await?;
 
-                let processor = read_exact(socket, vec![0; 19])
-                    .and_then(move |(socket, _bytes)| {
-                        allocate_library_client_handler(state)
-                            .map(|port| (socket, port))
-                    })
-                    .map(|(socket, allocated_port)| {
-                        write_all(socket, (allocated_port as u32).to_be_bytes())
-                    })
-                    .map(|_| ())
-                    .map_err(|err| eprintln!("Failed responding to port: {:?}", err));
-                tokio::spawn(processor)
-            });
-        tokio::run(done);
-    }
+        loop {
+            match listener.accept().await {
+                Ok((socket, _address)) => {
+                    let state = state.clone();
 
-    pub fn run(state: LockedSharedState) {
-        Self::spawn("0.0.0.0:12523", state.clone());
-    }
-}
+                    tokio::spawn(async move {
+                        let mut socket = Framed::new(socket, BytesCodec::new());
 
-fn allocate_library_client_handler(
-    state: LockedSharedState,
-) -> InitializeClientLibraryHandler {
-    InitializeClientLibraryHandler {
-        state: state,
-    }
-}
+                        while let Some(result) = socket.next().await {
+                            match result {
+                                Ok(_data) => {
+                                    let state = state.clone();
+                                    let allocated_socket = TcpListener::bind(&random_ipv4_socket_address()).await.unwrap();
+                                    let allocated_port = allocated_socket.local_addr().unwrap().port();
 
-struct InitializeClientLibraryHandler {
-    state: LockedSharedState,
-}
-
-impl Future for InitializeClientLibraryHandler {
-    type Item = u16;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let state = self.state.clone();
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0);
-
-        match LibraryClientHandler::spawn(addr, state) {
-            Ok(port) => Ok(Async::Ready(port)),
-            Err(_) => Err(Error::new(ErrorKind::AddrInUse, "failed allocating port")),
+                                    tokio::spawn(async move {
+                                        spawn_library_client_handler(allocated_socket, &state).await;
+                                    });
+                                    let message = Bytes::from(allocated_port.to_be_bytes().to_vec());
+                                    match socket.send(message).await {
+                                        Err(err) => eprintln!("failed sending library server port to client; error = {}", err),
+                                        _ => {},
+                                    }
+                                },
+                                Err(_err) => {},
+                            };
+                        }
+                    });
+                },
+                Err(err) => eprintln!("error accepting socket: {}", err),
+            }
         }
+    }
+
+    pub async fn run(state: Arc<Mutex<ServerState>>) -> Result<(), std::io::Error> {
+        Self::spawn("0.0.0.0:12523", state.clone()).await
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::net::{Ipv4Addr, IpAddr};
     use super::*;
     use super::super::fixtures;
     use pretty_assertions::{assert_eq};
+    use crate::rekordbox::ServerState;
+
+    fn context() -> ClientState {
+        ClientState::new(Arc::new(Mutex::new(ServerState::new())))
+    }
 
     pub struct TestController;
     impl Controller for TestController {
@@ -1119,7 +1025,7 @@ mod test {
 
     #[test]
     fn test_controller_trait() {
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let request_handler = RequestHandler::new(
             Box::new(TestController {}),
             fixtures::setup_request_packet().unwrap().1,
@@ -1131,7 +1037,7 @@ mod test {
 
     #[test]
     fn test_setup_request_handling() {
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let request_handler = RequestHandler::new(
             Box::new(SetupController {}),
             fixtures::setup_request_packet().unwrap().1,
@@ -1144,7 +1050,7 @@ mod test {
     #[test]
     fn test_root_menu_dialog() {
         let dialog = fixtures::root_menu_dialog();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -1156,7 +1062,7 @@ mod test {
     fn test_artist_dialog_response() {
         let dialog = fixtures::artist_dialog();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::ArtistRequest), context.previous_request);
@@ -1166,7 +1072,7 @@ mod test {
     #[test]
     fn test_album_by_artist_dialog() {
         let dialog = fixtures::album_by_artist_dialog();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -1177,7 +1083,7 @@ mod test {
     #[test]
     fn test_title_by_artist_dialog() {
         let dialog = fixtures::title_by_artist_album_dialog();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -1188,7 +1094,7 @@ mod test {
     #[test]
     fn test_title_by_artist_dialog_single_track() {
         let dialog = fixtures::title_by_artist_album_single_track_dialog();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -1199,7 +1105,7 @@ mod test {
     #[test]
     fn test_metadata_dialog() {
         let dialog = fixtures::metadata_dialog();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -1210,7 +1116,7 @@ mod test {
     #[test]
     fn test_mount_info_dialog() {
         let dialog = fixtures::mount_info_request_dialog();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -1221,7 +1127,7 @@ mod test {
     #[test]
     fn test_preview_waveform_request() {
         let dialog = fixtures::preview_waveform_request();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -1230,7 +1136,7 @@ mod test {
     #[test]
     fn test_load_track_request() {
         let dialog = fixtures::load_track_request();
-        let mut context = ClientState::new(SharedState::new());
+        let mut context = context();
         let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));

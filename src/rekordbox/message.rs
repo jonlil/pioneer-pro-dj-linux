@@ -1,6 +1,7 @@
 use crate::rekordbox::{SOFTWARE_IDENTIFICATION, APPLICATION_NAME};
-use std::net::IpAddr;
 use crate::utils::network::PioneerNetwork;
+use bytes::Bytes;
+use super::packets::*;
 
 pub type RekordboxMessageType = Vec<u8>;
 
@@ -37,10 +38,7 @@ impl<'a> ComposeRekordboxMessage for ApplicationBroadcast<'a> {
             APPLICATION_NAME.to_vec(),
             vec![0x01,0x03,0x00,0x36,0x11,0x01],
             <[u8; 6]>::from(self.network.mac_address()).to_vec(),
-            match self.network.ip() {
-                IpAddr::V4(ip) => ip.octets().to_vec(),
-                IpAddr::V6(_ip) => panic!("IPv6 is not supported by TermDJ protocol"),
-            },
+            self.network.ip().octets().to_vec(),
             vec![0x01,0x01,0x00,0x00,0x04,0x08]
         ]
     }
@@ -48,88 +46,6 @@ impl<'a> ComposeRekordboxMessage for ApplicationBroadcast<'a> {
 impl<'a> Into<RekordboxMessageType> for ApplicationBroadcast<'a> {
     fn into(self) -> RekordboxMessageType {
         self.compose().into_iter().flatten().collect()
-    }
-}
-
-pub struct DiscoveryInitial<'a> {
-    network: &'a PioneerNetwork,
-    sequence: u8,
-}
-
-impl<'a> DiscoveryInitial<'a> {
-    pub fn new(network: &'a PioneerNetwork, sequence: u8) -> Self {
-        Self { network: network, sequence: sequence }
-    }
-}
-
-impl<'a> ComposeRekordboxMessage for DiscoveryInitial<'a> {
-    fn compose(&self) -> Vec<RekordboxMessageType> {
-        vec![
-            SOFTWARE_IDENTIFICATION.to_vec(),
-            vec![0x00,0x00],
-            APPLICATION_NAME.to_vec(),
-            vec![0x01, 0x03, 0x00, 0x2c, self.sequence, 0x04],
-            <[u8; 6]>::from(self.network.mac_address()).to_vec(),
-        ]
-    }
-}
-impl<'a> Into<RekordboxMessageType> for DiscoveryInitial<'a> {
-    fn into(self) -> RekordboxMessageType {
-        self.compose().into_iter().flatten().collect()
-    }
-}
-
-pub struct DiscoverySequence<'a> {
-    network: &'a PioneerNetwork,
-    sequence: u8,
-    index: i32,
-}
-
-impl<'a> DiscoverySequence<'a> {
-    pub fn new(network: &'a PioneerNetwork, sequence: u8, index: i32) -> Self {
-        Self { network: network, sequence: sequence, index: index }
-    }
-
-    fn map_sequence_byte(&self) -> u8 {
-        if self.index == 1 {
-            0x11
-        } else if self.index == 2 {
-            0x12
-        } else if self.index == 3 {
-            0x29
-        } else if self.index == 4 {
-            0x2a
-        } else if self.index == 5 {
-            0x2b
-        } else {
-            0x2c
-        }
-    }
-}
-
-impl<'a> Into<RekordboxMessageType> for DiscoverySequence<'a> {
-    fn into(self) -> RekordboxMessageType {
-        self.compose().into_iter().flatten().collect()
-    }
-}
-
-// TODO: Possible performance fix here is to reuse this struct instead of composing
-// new ones for each of these 36 messages.
-impl<'a> ComposeRekordboxMessage for DiscoverySequence<'a> {
-    fn compose(&self) -> Vec<RekordboxMessageType> {
-        vec![
-            SOFTWARE_IDENTIFICATION.to_vec(),
-            vec![0x02, 0x00],
-            APPLICATION_NAME.to_vec(),
-            vec![0x01, 0x03, 0x00, 0x32],
-            match self.network.ip() {
-                IpAddr::V4(ip) => ip.octets().to_vec(),
-                IpAddr::V6(_ip) => panic!("IPv6 is not supported by TermDJ protocol"),
-            },
-            <[u8; 6]>::from(self.network.mac_address()).to_vec(),
-            vec![self.map_sequence_byte(), self.sequence],
-            vec![0x04, 0x01]
-        ]
     }
 }
 
@@ -146,48 +62,54 @@ impl ComposeRekordboxMessage for ApplicationLinkRequest {
     }
 }
 
+// TODO: refactor to RekordboxReply
 rekordbox_message!(InitiateRPCState);
+impl From<&InitiateRPCState> for Bytes {
+    fn from(_message: &InitiateRPCState) -> Bytes {
+        Bytes::from(StatusPacket::new(
+            StatusPacketType::RekordboxReply,
+            1,
+            1,
+            StatusContentType::RekordboxReply(RekordboxReply {
+                name: "Term DJ".to_string(),
+            })
+        ))
+    }
+}
+
 impl ComposeRekordboxMessage for InitiateRPCState {
     fn compose(&self) -> Vec<RekordboxMessageType> {
-        let mut payload = vec![];
-        payload.extend(&SOFTWARE_IDENTIFICATION.to_vec());
-        payload.extend(vec![0x11]);
-        payload.extend(&APPLICATION_NAME.to_vec());
-        payload.extend(vec![
-            0x01, 0x01, 0x11, 0x01, 0x04,
-            0x11, 0x01, 0x00, 0x00, 0x00
-        ]);
-
-        payload.extend(vec![
-            0x54, 0x00, 0x65, 0x00, 0x72,
-            0x00, 0x6d, 0x00, 0x20, 0x00,
-            0x44, 0x00, 0x4a, 0x00,
-        ]);
-        payload.extend(vec![0x00; 241]);
-
-        vec![payload]
+        vec![Bytes::from(self).into_iter().collect::<Vec<u8>>()]
     }
 }
 
 rekordbox_message!(AcknowledgeSuccessfulLinking);
 impl ComposeRekordboxMessage for AcknowledgeSuccessfulLinking {
     fn compose(&self) -> Vec<RekordboxMessageType> {
-        vec![
-            vec![
-                0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c, 0x06, 0x72, 0x65, 0x6b, 0x6f, 0x72,
-                0x64, 0x62, 0x6f, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-                0x01, 0x11, 0x00, 0x9c, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00, 0x04, 0x00, 0x72, 0x00, 0x65,
-                0x00, 0x6b, 0x00, 0x6f, 0x00, 0x72, 0x00, 0x64, 0x00, 0x62, 0x00, 0x6f, 0x00, 0x78, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x1b, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x5e,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-            ],
-        ]
+        vec![Bytes::from(self).into_iter().collect::<Vec<u8>>()]
+    }
+}
+
+impl From<&AcknowledgeSuccessfulLinking> for Bytes {
+    fn from(_message: &AcknowledgeSuccessfulLinking) -> Bytes {
+        Bytes::from(StatusPacket::new(
+            StatusPacketType::LinkReply,
+            1,
+            1,
+            StatusContentType::LinkReply(LinkReply {
+                source_player_number: 0x11,
+                slot: PlayerSlot::Rekordbox,
+                name: Utf16FixedString::new("rekordbox".to_string(), 64),
+                date: Utf16FixedString::new("".to_string(), 24),
+                unknown5: Utf16FixedString::new("".to_string(), 32),
+                track_count: 1051,
+                unknown6: 0,
+                unknown7: 257,
+                playlist_count: 94,
+                bytes_total: 0,
+                bytes_free: 0,
+            }),
+        ))
     }
 }
 

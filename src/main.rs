@@ -1,21 +1,15 @@
-mod rekordbox;
-mod utils;
 mod component;
 mod rpc;
+mod rekordbox;
+mod utils;
 
-extern crate pnet;
-extern crate nom;
-extern crate tokio;
+use crate::component::App;
 
-use std::io;
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut app = App::new();
 
-fn main() -> Result<(), io::Error> {
-    let mut app = component::App {};
-
-    match app.run() {
-        Ok(_) => {},
-        Err(err) => eprintln!("{:?}", err),
-    }
+    app.run().await;
 
     Ok(())
 }
