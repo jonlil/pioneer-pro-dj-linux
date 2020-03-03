@@ -223,8 +223,8 @@ struct KeepaliveEventHandler<'a> {
 impl<'a> EventHandler<KeepAliveEvent> for KeepaliveEventHandler<'a> {
     fn on_event(&self, event: KeepAliveEvent) {
         let (event, _peer) = event;
-        match (&event.kind(), &event.content()) {
-            (KeepAlivePacketType::Status, KeepAliveContentType::Status(status)) => {
+        match (&event.kind(), &event.content(), event.model().to_string() != &String::from("rekordbox")) {
+            (KeepAlivePacketType::Status, KeepAliveContentType::Status(status), true) => {
                 match self.state.clone().lock() {
                     Ok(mut state) => handle_keepalive_status(&event, status, &mut state, &self.tx),
                     Err(_) => {},
