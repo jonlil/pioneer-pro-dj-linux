@@ -445,6 +445,7 @@ pub enum RpcProcedure {
     PortmapDump,
     PortmapCallResult,
     NfsNull,
+    NfsLookup,
     MountMnt(MountMnt),
     MountExport,
     MountNull,
@@ -463,6 +464,10 @@ impl RpcProcedure {
             (RpcProgram::Portmap, 4u32) => Ok((input, RpcProcedure::PortmapDump)),
             (RpcProgram::Portmap, 5u32) => Ok((input, RpcProcedure::PortmapCallResult)),
             (RpcProgram::Portmap, _)    => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Nfs, 4)        => {
+                let (input, data) = NfsLookup::decode(&input)?;
+                Ok((input, RpcProcedure::NfsLookup))
+            },
             (RpcProgram::Nfs, _)        => Err(nom::Err::Error((input, Switch))),
             (RpcProgram::Mount, 5u32)   => Ok((input, RpcProcedure::MountExport)),
             (RpcProgram::Mount, 1u32)   => {
@@ -498,6 +503,16 @@ impl Decoder for MountMnt {
             // TODO: change this ErrorTag to something relevant.
             Err(_err) => Err(nom::Err::Error((input, Switch))),
         }
+    }
+}
+
+pub struct NfsLookup;
+
+impl Decoder for NfsLookup {
+    type Output = Self;
+
+    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+        Ok((input, NfsLookup))
     }
 }
 
