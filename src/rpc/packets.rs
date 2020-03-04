@@ -1,9 +1,10 @@
-use nom::number::complete::{be_u32, be_u16, le_u16};
+use nom::number::complete::{be_u32, be_u16, le_u16, be_u8};
 use nom::multi::count;
 use nom::IResult;
 use nom::error::ErrorKind::Switch;
 use bytes::{BytesMut, Bytes, BufMut};
 use std::convert::TryFrom;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -506,13 +507,47 @@ impl Decoder for MountMnt {
     }
 }
 
-pub struct NfsLookup;
+pub struct FileHandle {
+    data: Vec<u8>,
+}
+
+impl Decoder for FileHandle {
+    type Output = Self;
+
+    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+        let (input, fhandle) = count(be_u8, 32)(input)?;
+
+        Ok((input, Self { data: fhandle }))
+    }
+}
+
+pub struct NfsLookup {
+    filename: PathBuf,
+    fhandle: FileHandle,
+}
 
 impl Decoder for NfsLookup {
     type Output = Self;
 
     fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
-        Ok((input, NfsLookup))
+        let (input, file_handle) = FileHandle::decode(input)?;
+
+        let (input, length) = be_u32(input)?;
+        let (input, contents) = count(be_u8, length as usize)(input)?;
+        #[cfg(any(unix))] {
+            use std::ffi::OsStr;
+            use std::os::unix::ffi::OsStrExt;
+            let path = Path::new(OsStr::from_bytes(&contents)).to_path_buf();
+
+            return Ok((input, NfsLookup {
+                filename: path,
+                fhandle: file_handle,
+            }));
+        }
+        #[cfg(windows)] {
+        }
+
+        panic!("Platform not supported")
     }
 }
 
