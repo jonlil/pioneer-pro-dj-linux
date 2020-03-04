@@ -1,10 +1,6 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
-extern crate tokio;
-extern crate futures;
-extern crate bytes;
-
 pub mod server;
 pub mod packets;
 mod codec;
@@ -15,11 +11,15 @@ pub mod events {
         RpcReplyMessage,
         RpcCall,
     };
-
+    pub type RpcResult = Option<Result<RpcReplyMessage, std::io::Error>>;
     pub trait EventHandler: Send + Sync + 'static {
-        fn on_event(&self, procedure: &RpcProcedure, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error>;
+        fn on_event(
+            &self,
+            procedure: &RpcProcedure,
+            call: &RpcCall
+        ) -> RpcResult;
 
-        fn handle_event(&self, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+        fn handle_event(&self, call: &RpcCall) -> RpcResult {
             self.on_event(call.procedure(), call)
         }
     }

@@ -8,7 +8,7 @@ use futures::{SinkExt};
 
 use super::packets::*;
 use super::codec::RpcBytesCodec;
-use super::events::EventHandler;
+use super::events::{EventHandler, RpcResult};
 
 struct RpcProcedureRouter<T>
     where T: EventHandler,
@@ -22,13 +22,13 @@ fn rpc_procedure_router<T: EventHandler>(
     request: RpcMessage,
     address: SocketAddr,
     handler: Arc<T>,
-) -> Result<(RpcMessage, SocketAddr), std::io::Error> {
+) -> Option<Result<(RpcMessage, SocketAddr), std::io::Error>> {
     let transaction_id = request.xid;
     match request.message() {
         RpcMessageType::Call(call) => {
             match handler.handle_event(call) {
-                Ok(reply) => {
-                    Ok((
+                Some(Ok(reply)) => {
+                    Some(Ok((
                         RpcMessage::new(
                             transaction_id,
                             RpcMessageType::Reply(RpcReply {
@@ -39,9 +39,10 @@ fn rpc_procedure_router<T: EventHandler>(
                             })
                         ),
                         address,
-                    ))
+                    )))
                 },
-                Err(e) => Err(e),
+                Some(Err(e)) => Some(Err(e)),
+                None => None,
             }
         },
         RpcMessageType::Reply(_) => panic!("RpcReply not allowed in call processor."),
@@ -58,11 +59,12 @@ async fn rpc_program_server<T: EventHandler>(
     while let Some(result) = socket.next().await {
         match result {
             Ok((request, address)) => match rpc_procedure_router(request, address, handler.clone()) {
-                Ok(message) => match socket.send(message).await {
+                Some(Ok(message)) => match socket.send(message).await {
                     Ok(_) => {},
                     Err(err) => eprintln!("failed sending rpc response; error = {}", err),
                 },
-                Err(err) => eprintln!("failed routing rpc procedure; error = {}", err),
+                Some(Err(err)) => eprintln!("failed routing rpc procedure; error = {}", err),
+                None => {},
             },
             Err(err) => eprintln!("error decoding rpc message from socket; error = {}", err),
         }
@@ -139,22 +141,22 @@ mod test {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr, UdpSocket};
     use bytes::Bytes;
-    use std::io::{Error, ErrorKind, self};
+    use std::io::{Error, ErrorKind};
 
     struct Context;
     struct MockEventHandler;
     impl EventHandler for MockEventHandler {
-        fn on_event(&self, procedure: &RpcProcedure, _call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+        fn on_event(&self, procedure: &RpcProcedure, _call: &RpcCall) -> RpcResult {
             let context = Context;
 
             match procedure {
                 RpcProcedure::MountExport => {
-                    match mount_export_rpc_callback(context) {
+                    Some(match mount_export_rpc_callback(context) {
                         Ok(reply) => Ok(RpcReplyMessage::MountExport(reply)),
                         Err(err) => Err(err),
-                    }
+                    })
                 },
-                _ => Err(Error::new(ErrorKind::InvalidInput, "failed")),
+                _ => Some(Err(Error::new(ErrorKind::InvalidInput, "failed"))),
             }
         }
     }
