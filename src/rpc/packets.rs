@@ -446,7 +446,7 @@ pub enum RpcProcedure {
     PortmapDump,
     PortmapCallResult,
     NfsNull,
-    NfsLookup,
+    NfsLookup(NfsLookup),
     MountMnt(MountMnt),
     MountExport,
     MountNull,
@@ -467,7 +467,7 @@ impl RpcProcedure {
             (RpcProgram::Portmap, _)    => Err(nom::Err::Error((input, Switch))),
             (RpcProgram::Nfs, 4)        => {
                 let (input, data) = NfsLookup::decode(&input)?;
-                Ok((input, RpcProcedure::NfsLookup))
+                Ok((input, RpcProcedure::NfsLookup(data)))
             },
             (RpcProgram::Nfs, _)        => Err(nom::Err::Error((input, Switch))),
             (RpcProgram::Mount, 5u32)   => Ok((input, RpcProcedure::MountExport)),
@@ -507,6 +507,7 @@ impl Decoder for MountMnt {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct FileHandle {
     data: Vec<u8>,
 }
@@ -521,6 +522,7 @@ impl Decoder for FileHandle {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct NfsLookup {
     filename: PathBuf,
     fhandle: FileHandle,
@@ -534,7 +536,9 @@ impl Decoder for NfsLookup {
 
         let (input, length) = be_u32(input)?;
         let (input, contents) = count(be_u8, length as usize)(input)?;
-        #[cfg(any(unix))] {
+        let (input, _opaque_data) = be_u16(input)?;
+
+        #[cfg(unix)] {
             use std::ffi::OsStr;
             use std::os::unix::ffi::OsStrExt;
             let path = Path::new(OsStr::from_bytes(&contents)).to_path_buf();
@@ -547,7 +551,7 @@ impl Decoder for NfsLookup {
         #[cfg(windows)] {
         }
 
-        panic!("Platform not supported")
+        panic!("OS Platform not supported")
     }
 }
 
@@ -925,5 +929,11 @@ mod test {
                 ),
             }),
         }));
+    }
+
+    #[test]
+    fn it_can_decode_lookup_call() {
+        let call = Bytes::from(b"\0\0\0\"\0\0\0\0\0\0\0\x02\0\x01\x86\xa3\0\0\0\x02\0\0\0\x04\0\0\0\x01\0\0\0\x14\xf0\xbcq\x07\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x03\x01\0\0\0\0\x1bX\0\0\0\0\x11\x04\x01\0\0\0\0\x05\0\0\0\nU\0s\0e\0r\0s\0\0\0".to_vec());
+        assert_eq!(RpcMessage::decode(&call).is_ok(), true);
     }
 }
