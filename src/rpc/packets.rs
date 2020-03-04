@@ -5,6 +5,7 @@ use nom::error::ErrorKind::Switch;
 use bytes::{BytesMut, Bytes, BufMut};
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -138,6 +139,10 @@ impl RpcCall {
     pub fn procedure(&self) -> &RpcProcedure {
         &self.procedure
     }
+
+    pub fn program(&self) -> &RpcProgram {
+        &self.program
+    }
 }
 
 impl Decoder for RpcCall {
@@ -196,6 +201,7 @@ pub enum RpcReplyMessage {
     PortmapGetport(PortmapGetportReply),
     MountExport(MountExportReply),
     MountMnt(MountMntReply),
+    NfsLookup(NfsLookupReply),
 }
 
 impl From<RpcReplyMessage> for Bytes {
@@ -204,6 +210,7 @@ impl From<RpcReplyMessage> for Bytes {
             RpcReplyMessage::PortmapGetport(reply) => Bytes::from(reply),
             RpcReplyMessage::MountExport(reply)    => Bytes::from(reply),
             RpcReplyMessage::MountMnt(reply)       => Bytes::from(reply),
+            RpcReplyMessage::NfsLookup(reply)      => Bytes::from(reply),
         }
     }
 }
@@ -292,11 +299,11 @@ impl ExportListEntry {
 #[derive(Debug, PartialEq)]
 pub struct MountMntReply {
     status: u32,
-    fhandle: [u8; 32],
+    fhandle: FileHandle,
 }
 
 impl MountMntReply {
-    pub fn new(status: u32, fhandle: [u8; 32]) -> MountMntReply {
+    pub fn new(status: u32, fhandle: FileHandle) -> MountMntReply {
         MountMntReply {
             status,
             fhandle,
@@ -309,9 +316,93 @@ impl From<MountMntReply> for Bytes {
         let mut buf = BytesMut::new();
 
         buf.extend(reply.status.to_be_bytes().to_vec());
-        buf.extend(reply.fhandle.to_vec());
+        buf.extend(Bytes::from(reply.fhandle).to_vec());
 
         Bytes::from(buf)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsLookupReply {
+    fhandle: FileHandle,
+    _type: FileType,
+    mode: FileMode,
+    nlink: u32,
+    uid: u32,
+    gid: u32,
+    size: u32,
+    blocksize: u32,
+    rdev: u32,
+    blocks: u32,
+    fsid: u32,
+    file_id: u32,
+    atime: SystemTime,
+    mtime: SystemTime,
+    ctime: SystemTime,
+}
+
+/// This method transforms std::time::SystemTime (u64)
+/// to a timeval type as defined in RFC 1094.
+fn system_time_to_bytes(time: SystemTime) -> Bytes {
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(n) => {
+            let mut buffer = BytesMut::with_capacity(8);
+
+            // RFC 1094 use 4 bytes for representing timestamp
+            let secs: [u8; 8] = n.as_secs().to_be_bytes();
+            buffer.extend(secs[4..=7].to_vec());
+            buffer.put_u32(0);
+
+            buffer.freeze()
+        },
+        Err(_err) => Bytes::from([0u8; 8].to_vec()),
+    }
+}
+
+impl From<NfsLookupReply> for Bytes {
+    fn from(reply: NfsLookupReply) -> Bytes {
+        let mut buffer = BytesMut::with_capacity(104);
+
+        buffer.put(Bytes::from(reply.fhandle));
+        buffer.put(Bytes::from(reply._type));
+        buffer.put_u32(reply.nlink);
+        buffer.put_u32(reply.uid);
+        buffer.put_u32(reply.gid);
+        buffer.put_u32(reply.size);
+        buffer.put_u32(reply.blocksize);
+        buffer.put_u32(reply.rdev);
+        buffer.put_u32(reply.blocks);
+        buffer.put_u32(reply.file_id);
+        buffer.extend(system_time_to_bytes(reply.atime));
+        buffer.extend(system_time_to_bytes(reply.mtime));
+        buffer.extend(system_time_to_bytes(reply.ctime));
+
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FileMode {
+    name: u8,
+    user: u8,
+    group: u8,
+    other: u8,
+}
+
+#[derive(Debug, PartialEq)]
+enum FileType {
+    File, // 1u32
+    Directory, // 2u32
+}
+
+impl From<FileType> for Bytes {
+    fn from(file_type: FileType) -> Self {
+        let mut buffer = BytesMut::with_capacity(1);
+        buffer.put_u8(match file_type {
+            FileType::File => 1u8,
+            FileType::Directory => 2u8,
+        });
+        buffer.freeze()
     }
 }
 
@@ -512,6 +603,14 @@ pub struct FileHandle {
     data: Vec<u8>,
 }
 
+impl FileHandle {
+    pub fn new(data: [u8; 32]) -> Self {
+        Self {
+            data: data.to_vec(),
+        }
+    }
+}
+
 impl Decoder for FileHandle {
     type Output = Self;
 
@@ -519,6 +618,12 @@ impl Decoder for FileHandle {
         let (input, fhandle) = count(be_u8, 32)(input)?;
 
         Ok((input, Self { data: fhandle }))
+    }
+}
+
+impl From<FileHandle> for Bytes {
+    fn from(fhandle: FileHandle) -> Bytes {
+        Bytes::from(fhandle.data)
     }
 }
 
@@ -561,6 +666,12 @@ pub struct PortmapGetport {
     program: RpcProgram,
     protocol: PortmapProtocol,
     port: u32,
+}
+
+impl PortmapGetport {
+    pub fn program(&self) -> &RpcProgram {
+        &self.program
+    }
 }
 
 impl Decoder for PortmapGetport {
@@ -924,7 +1035,7 @@ mod test {
                 data: RpcReplyMessage::MountMnt(
                     MountMntReply {
                         status: 0,
-                        fhandle: [0x00; 32],
+                        fhandle: FileHandle::new([0x00; 32]),
                     },
                 ),
             }),

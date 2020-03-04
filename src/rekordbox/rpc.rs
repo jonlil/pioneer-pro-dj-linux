@@ -33,7 +33,7 @@ pub async fn server(state_ref: Arc<Mutex<ServerState>>) -> Result<(), std::io::E
 }
 
 fn mount_mnt_rpc_callback(_context: Context, _data: &MountMnt) -> Result<MountMntReply, std::io::Error> {
-    Ok(MountMntReply::new(0, [0x00; 32]))
+    Ok(MountMntReply::new(0, FileHandle::new([0x00; 32])))
 }
 
 fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::io::Error> {

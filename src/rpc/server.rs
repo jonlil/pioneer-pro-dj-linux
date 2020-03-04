@@ -59,10 +59,9 @@ fn rpc_procedure_router<T: EventHandler>(
 ///
 /// This server will crash directly it is unable to process a message in either direction.
 async fn rpc_program_server<T: EventHandler>(
-    socket: UdpSocket,
+    mut socket: UdpFramed<RpcBytesCodec>,
     handler: Arc<T>,
 ) -> Result<(), String> {
-    let mut socket = UdpFramed::new(socket, RpcBytesCodec::new());
 
     while let Some(package) = socket.next().await {
         let handler = handler.clone();
@@ -79,6 +78,22 @@ async fn rpc_program_server<T: EventHandler>(
     }
 
     Ok(())
+}
+
+struct RpcNfsProgramHandler;
+
+impl RpcNfsProgramHandler {
+    fn new() -> Self {
+        Self
+    }
+
+    fn lookup() {}
+
+    async fn run(&self, mut socket: UdpFramed<RpcBytesCodec>) {
+        while let Some(package) = socket.next().await {
+            dbg!(package);
+        }
+    }
 }
 
 pub struct PortmapServer {
@@ -109,11 +124,33 @@ impl PortmapServer {
                     let handler = handler.clone();
                     let allocated_rpc_socket = UdpSocket::bind(&get_ipv4_socket_addr(0)).await?;
                     let local_addr = allocated_rpc_socket.local_addr()?;
+                    let allocated_rpc_socket = UdpFramed::new(allocated_rpc_socket, RpcBytesCodec::new());
 
-                    // Spawn RPC Program in thread to handle multiple concurrent clients
-                    tokio::spawn(async move {
-                        rpc_program_server(allocated_rpc_socket, handler).await
-                    });
+                    match rpc_message.message() {
+                        RpcMessageType::Call(call) => {
+                            match call.procedure() {
+                                RpcProcedure::PortmapGetport(getport) => {
+                                    match getport.program() {
+                                        RpcProgram::Nfs => {
+                                            tokio::spawn(async move {
+                                                let program_handler = RpcNfsProgramHandler::new();
+                                                program_handler.run(allocated_rpc_socket).await;
+                                            });
+                                        },
+                                        _ => {
+                                            // Spawn RPC Program in thread to handle multiple concurrent clients
+                                            tokio::spawn(async move {
+                                                rpc_program_server(allocated_rpc_socket, handler).await
+                                            });
+                                        },
+                                    }
+                                },
+                                _ => {},
+                            }
+                        },
+                        _ => {},
+                    };
+
 
                     // Prepare portmap response
                     let portmap_response = RpcMessage::new(
