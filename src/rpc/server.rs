@@ -25,6 +25,18 @@ enum RpcServerError {
     IOError(std::io::Error),
 }
 
+fn serialize_rpc_reply_message(reply: RpcReplyMessage, transaction_id: u32) -> RpcMessage {
+    RpcMessage::new(
+        transaction_id,
+        RpcMessageType::Reply(RpcReply {
+            verifier: RpcAuth::Null,
+            reply_state: RpcReplyState::Accepted,
+            accept_state: RpcAcceptState::Success,
+            data: reply,
+        })
+    )
+}
+
 fn rpc_procedure_router<T: EventHandler>(
     request: RpcMessage,
     address: SocketAddr,
@@ -34,20 +46,7 @@ fn rpc_procedure_router<T: EventHandler>(
     match request.message() {
         RpcMessageType::Call(call) => {
             match handler.handle_event(call) {
-                Some(Ok(reply)) => {
-                    Ok((
-                        RpcMessage::new(
-                            transaction_id,
-                            RpcMessageType::Reply(RpcReply {
-                                verifier: RpcAuth::Null,
-                                reply_state: RpcReplyState::Accepted,
-                                accept_state: RpcAcceptState::Success,
-                                data: reply,
-                            })
-                        ),
-                        address,
-                    ))
-                },
+                Some(Ok(reply)) => Ok((serialize_rpc_reply_message(reply, transaction_id), address)),
                 Some(Err(e)) => Err(RpcServerError::IOError(e)),
                 None => Err(RpcServerError::ProgramNotImplemented),
             }
