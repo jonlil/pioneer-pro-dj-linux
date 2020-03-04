@@ -11,8 +11,6 @@ pub const APPLICATION_NAME: [u8; 20] = [
 ];
 
 pub mod server;
-
-pub mod event;
 pub mod player;
 pub mod util;
 
