@@ -18,17 +18,24 @@ struct RpcProcedureRouter<T>
     handler: Arc<T>,
 }
 
+#[derive(Debug)]
+enum RpcServerError {
+    ProgramNotImplemented,
+    ReplyNotAllowed,
+    IOError(std::io::Error),
+}
+
 fn rpc_procedure_router<T: EventHandler>(
     request: RpcMessage,
     address: SocketAddr,
     handler: Arc<T>,
-) -> Option<Result<(RpcMessage, SocketAddr), std::io::Error>> {
+) -> Result<(RpcMessage, SocketAddr), RpcServerError> {
     let transaction_id = request.xid;
     match request.message() {
         RpcMessageType::Call(call) => {
             match handler.handle_event(call) {
                 Some(Ok(reply)) => {
-                    Some(Ok((
+                    Ok((
                         RpcMessage::new(
                             transaction_id,
                             RpcMessageType::Reply(RpcReply {
@@ -39,13 +46,13 @@ fn rpc_procedure_router<T: EventHandler>(
                             })
                         ),
                         address,
-                    )))
+                    ))
                 },
-                Some(Err(e)) => Some(Err(e)),
-                None => None,
+                Some(Err(e)) => Err(RpcServerError::IOError(e)),
+                None => Err(RpcServerError::ProgramNotImplemented),
             }
         },
-        RpcMessageType::Reply(_) => panic!("RpcReply not allowed in call processor."),
+        RpcMessageType::Reply(_) => Err(RpcServerError::ReplyNotAllowed),
     }
 }
 
@@ -59,12 +66,11 @@ async fn rpc_program_server<T: EventHandler>(
     while let Some(result) = socket.next().await {
         match result {
             Ok((request, address)) => match rpc_procedure_router(request, address, handler.clone()) {
-                Some(Ok(message)) => match socket.send(message).await {
+                Ok(message) => match socket.send(message).await {
                     Ok(_) => {},
                     Err(err) => eprintln!("failed sending rpc response; error = {}", err),
                 },
-                Some(Err(err)) => eprintln!("failed routing rpc procedure; error = {}", err),
-                None => {},
+                Err(err) => eprintln!("failed routing rpc procedure; error = {:?}", err),
             },
             Err(err) => eprintln!("error decoding rpc message from socket; error = {}", err),
         }
