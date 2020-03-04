@@ -56,22 +56,25 @@ fn rpc_procedure_router<T: EventHandler>(
 }
 
 /// Make this server handle generic program handlers.
+///
+/// This server will crash directly it is unable to process a message in either direction.
 async fn rpc_program_server<T: EventHandler>(
     socket: UdpSocket,
     handler: Arc<T>,
-) -> Result<(), std::io::Error> {
+) -> Result<(), String> {
     let mut socket = UdpFramed::new(socket, RpcBytesCodec::new());
 
-    while let Some(result) = socket.next().await {
-        match result {
-            Ok((request, address)) => match rpc_procedure_router(request, address, handler.clone()) {
-                Ok(message) => match socket.send(message).await {
-                    Ok(_) => {},
-                    Err(err) => eprintln!("failed sending rpc response; error = {}", err),
-                },
-                Err(err) => eprintln!("failed routing rpc procedure; error = {:?}", err),
+    while let Some(package) = socket.next().await {
+        let handler = handler.clone();
+
+        match package {
+            Ok((request, address)) => {
+                let message = rpc_procedure_router(request, address, handler.clone())
+                    .map_err(|err| format!("failed processing RPC Message into reply; error = {:?}", err))?;
+                socket.send(message).await
+                    .map_err(|_| String::from("Failed sending on socket"))?;
             },
-            Err(err) => eprintln!("error decoding rpc message from socket; error = {}", err),
+            Err(err) => eprintln!("error decoding bytes into RPC Message; err = {}", err),
         }
     }
 
