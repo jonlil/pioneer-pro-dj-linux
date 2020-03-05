@@ -629,8 +629,14 @@ impl From<FileHandle> for Bytes {
 
 #[derive(Debug, PartialEq)]
 pub struct NfsLookup {
-    filename: PathBuf,
-    fhandle: FileHandle,
+    pub filename: PathBuf,
+    pub fhandle: FileHandle,
+}
+
+impl NfsLookup {
+    pub fn filename(&self) -> &PathBuf {
+        &self.filename
+    }
 }
 
 impl Decoder for NfsLookup {

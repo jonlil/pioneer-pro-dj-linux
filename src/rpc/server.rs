@@ -6,9 +6,10 @@ use tokio::net::UdpSocket;
 use tokio::stream::StreamExt;
 use futures::{SinkExt};
 
-use super::packets::*;
+use super::packets::{*, self as rpc_packages};
 use super::codec::RpcBytesCodec;
 use super::events::{EventHandler, RpcResult};
+use std::path::PathBuf;
 
 struct RpcProcedureRouter<T>
     where T: EventHandler,
@@ -80,16 +81,29 @@ async fn rpc_program_server<T: EventHandler>(
     Ok(())
 }
 
-struct RpcNfsProgramHandler;
+struct RpcNfsProgramHandler {
+    path: PathBuf,
+}
 
 impl RpcNfsProgramHandler {
     fn new() -> Self {
-        Self
+        Self {
+            path: PathBuf::new(),
+        }
     }
 
-    fn lookup() {}
+    fn lookup(&mut self, lookup: rpc_packages::NfsLookup) {
+        self.path.push(lookup.filename());
 
-    async fn run(&self, mut socket: UdpFramed<RpcBytesCodec>) {
+        match std::fs::metadata(self.path.as_path()) {
+            Ok(metadata) => {
+                dbg!(metadata);
+            },
+            Err(err) => {},
+        };
+    }
+
+    async fn run(&mut self, mut socket: UdpFramed<RpcBytesCodec>) {
         while let Some(package) = socket.next().await {
             dbg!(package);
         }
@@ -133,7 +147,7 @@ impl PortmapServer {
                                     match getport.program() {
                                         RpcProgram::Nfs => {
                                             tokio::spawn(async move {
-                                                let program_handler = RpcNfsProgramHandler::new();
+                                                let mut program_handler = RpcNfsProgramHandler::new();
                                                 program_handler.run(allocated_rpc_socket).await;
                                             });
                                         },
