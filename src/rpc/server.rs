@@ -46,7 +46,7 @@ fn rpc_procedure_router<T: EventHandler>(
     let transaction_id = request.xid;
     match request.message() {
         RpcMessageType::Call(call) => {
-            match handler.handle_event(call) {
+            match handler.handle_event(&call) {
                 Some(Ok(reply)) => Ok((serialize_rpc_reply_message(reply, transaction_id), address)),
                 Some(Err(e)) => Err(RpcServerError::IOError(e)),
                 None => Err(RpcServerError::ProgramNotImplemented),
@@ -92,20 +92,43 @@ impl RpcNfsProgramHandler {
         }
     }
 
-    fn lookup(&mut self, lookup: rpc_packages::NfsLookup) {
+    fn lookup(&mut self, lookup: &rpc_packages::NfsLookup) {
+        dbg!(lookup);
         self.path.push(lookup.filename());
 
         match std::fs::metadata(self.path.as_path()) {
             Ok(metadata) => {
                 dbg!(metadata);
             },
-            Err(err) => {},
+            Err(err) => {
+                dbg!(err);
+            },
         };
+    }
+
+    fn call_procedure(&mut self, call: &RpcCall) {
+        match call.procedure() {
+            RpcProcedure::NfsLookup(lookup) => {
+                self.lookup(lookup);
+            }
+            _ => {},
+        }
     }
 
     async fn run(&mut self, mut socket: UdpFramed<RpcBytesCodec>) {
         while let Some(package) = socket.next().await {
-            dbg!(package);
+            match package {
+                Ok((rpc_message, address)) => {
+                    dbg!(&rpc_message);
+                    match rpc_message.message() {
+                        RpcMessageType::Call(call) => {
+                            self.call_procedure(call);
+                        },
+                        _ => {},
+                    }
+                },
+                Err(err) => {},
+            }
         }
     }
 }
