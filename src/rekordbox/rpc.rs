@@ -44,7 +44,7 @@ fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::
             return Ok(MountExportReply {
                 export_list_entries: vec![
                     ExportListEntry::new(
-                        String::from("/C/"),
+                        String::from("/"),
                         vec![
                             address,
                         ],
