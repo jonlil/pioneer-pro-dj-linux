@@ -25,3 +25,30 @@ pub const ROOT_KEY: MetadataType = 0x0000008b;
 pub const ROOT_FOLDER: MetadataType = 0x00000090;
 pub const ROOT_SEARCH: MetadataType = 0x00000091;
 pub const ROOT_HISTORY: MetadataType = 0x00000095;
+
+pub enum ArgumentType {
+    MountPath,
+    Folder,
+    Album,
+    Title,
+    Genre,
+    Artist,
+    Playlist,
+    Rating,
+    Duration,
+    Bpm,
+    Label,
+    Key,
+    ColorNone,
+    Unknown1,
+    Comment,
+    RootArtist,
+    RootAlbum,
+    RootTrack,
+    RootPlaylist,
+    RootRating,
+    RootKey,
+    RootFolder,
+    RootSearch,
+    RootHistory,
+}
