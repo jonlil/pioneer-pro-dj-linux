@@ -647,7 +647,6 @@ impl Decoder for NfsLookup {
 
         let (input, length) = be_u32(input)?;
         let (input, contents) = count(be_u8, length as usize)(input)?;
-        let (input, _opaque_data) = be_u16(input)?;
 
         #[cfg(unix)] {
             use std::ffi::OsStr;
