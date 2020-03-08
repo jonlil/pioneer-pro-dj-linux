@@ -1,7 +1,7 @@
 use nom::number::complete::{be_u32, be_u16, le_u16, be_u8};
 use nom::multi::count;
 use nom::IResult;
-use nom::error::ErrorKind::Switch;
+use nom::error::ErrorKind::{Switch, MapRes};
 use bytes::{BytesMut, Bytes, BufMut};
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
@@ -646,22 +646,17 @@ impl Decoder for NfsLookup {
         let (input, file_handle) = FileHandle::decode(input)?;
 
         let (input, length) = be_u32(input)?;
-        let (input, contents) = count(be_u8, length as usize)(input)?;
+        let (input, contents) = count(le_u16, length as usize / 2)(input)?;
 
-        #[cfg(unix)] {
-            use std::ffi::OsStr;
-            use std::os::unix::ffi::OsStrExt;
-            let path = Path::new(OsStr::from_bytes(&contents)).to_path_buf();
+        let contents = String::from_utf16(&contents)
+            .map_err(|_| nom::Err::Error((input, MapRes)))?;
 
-            return Ok((input, NfsLookup {
-                filename: path,
-                fhandle: file_handle,
-            }));
-        }
-        #[cfg(windows)] {
-        }
+        let path = Path::new(&format!("/{}", contents)).to_path_buf();
 
-        panic!("OS Platform not supported")
+        Ok((input, NfsLookup {
+            filename: path,
+            fhandle: file_handle,
+        }))
     }
 }
 
