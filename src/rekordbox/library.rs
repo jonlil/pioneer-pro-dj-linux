@@ -6,7 +6,7 @@ use tokio::stream::StreamExt;
 use tokio_util::codec::{Framed, BytesCodec};
 use futures::SinkExt;
 
-use super::packets::{DBMessage, ManyDBMessages};
+use super::packets::{DBMessage, ManyDBMessages, Arguments};
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
@@ -308,24 +308,21 @@ fn build_message_header(transaction_id: &DBField) -> DBMessage {
     )
 }
 
-fn build_message_item(transaction_id: &DBField, metadata: (DBField, u32, u8, u8, u8)) -> DBMessage {
+fn build_message_item(
+    transaction_id: &DBField,
+    value1: &str,
+    entry_type: u32,
+    entry_id2: u32,
+) -> DBMessage {
     DBMessage::new(
         transaction_id.clone(),
         DBRequestType::MenuItem,
-        ArgumentCollection::new(vec![
-            DBField::from([0x00, 0x00, 0x00, 0x00]),
-            DBField::from([0x00, 0x00, 0x00, metadata.2]),
-            DBField::from([0x00, 0x00, 0x00, metadata.3]),
-            metadata.0,
-            DBField::from([0x00, 0x00, 0x00, 0x02]),
-            DBField::from(""),
-            DBField::from(metadata.1),
-            DBField::from([0x00, 0x00, 0x00, 0x00]),
-            DBField::from([0x00, 0x00, 0x00, 0x00]),
-            DBField::from([0x00, 0x00, 0x00, 0x00]),
-            DBField::from([0x00, 0x00, metadata.4, 0x00]),
-            DBField::from([0x00, 0x00, 0x00, 0x00]),
-        ]),
+        Arguments {
+            entry_id2,
+            value1: value1,
+            _type: entry_type,
+            ..Default::default()
+        }
     )
 }
 
@@ -350,22 +347,18 @@ impl RenderController {
 
         response.extend(vec![
             // MenuName, MetadataType, MenuId
-            ("\u{fffa}ARTIST\u{fffb}", metadata_type::ROOT_ARTIST, 0x02, 0x12),
-            ("\u{fffa}ALBUM\u{fffb}", metadata_type::ROOT_ALBUM, 0x03, 0x10),
-            ("\u{fffa}TRACK\u{fffb}", metadata_type::ROOT_TRACK, 0x04, 0x10),
-            ("\u{fffa}KEY\u{fffb}", metadata_type::ROOT_KEY, 0x0c, 0x0c),
-            ("\u{fffa}PLAYLIST\u{fffb}", metadata_type::ROOT_PLAYLIST, 0x05, 0x16),
-            ("\u{fffa}HISTORY\u{fffb}", metadata_type::ROOT_HISTORY, 0x16, 0x14),
-            ("\u{fffa}SEARCH\u{fffb}", metadata_type::ROOT_SEARCH, 0x12, 0x12),
-        ].iter().map(|item| {
-            build_message_item(&transaction_id, (
-                DBField::from(item.0),
-                item.1,
-                item.2,
-                item.3,
-                0x00,
-            ))
-        }).collect());
+            ("\u{fffa}ARTIST\u{fffb}", metadata_type::ROOT_ARTIST,      0x02),
+            ("\u{fffa}ALBUM\u{fffb}", metadata_type::ROOT_ALBUM,        0x03),
+            ("\u{fffa}TRACK\u{fffb}", metadata_type::ROOT_TRACK,        0x04),
+            ("\u{fffa}KEY\u{fffb}", metadata_type::ROOT_KEY,            0x0c),
+            ("\u{fffa}PLAYLIST\u{fffb}", metadata_type::ROOT_PLAYLIST,  0x05),
+            ("\u{fffa}HISTORY\u{fffb}", metadata_type::ROOT_HISTORY,    0x16),
+            ("\u{fffa}SEARCH\u{fffb}", metadata_type::ROOT_SEARCH,      0x12),
+        ].iter().map(|item| build_message_item(&transaction_id,
+            item.0,
+            item.1,
+            item.2,
+        )).collect());
         response.push(build_message_footer(&transaction_id));
 
         response
@@ -377,13 +370,11 @@ impl RenderController {
             build_message_header(&transaction_id),
         ]);
 
-        response.push(build_message_item(&transaction_id, (
-            DBField::from("Loopmasters"),
+        response.push(build_message_item(&transaction_id,
+            "Loopmasters",
             metadata_type::ARTIST,
             0x01,
-            0x18,
-            0x00,
-        )));
+        ));
 
         response.push(DBMessage::new(
             transaction_id,
@@ -400,13 +391,11 @@ impl RenderController {
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
-        response.push(build_message_item(&transaction_id, (
-            DBField::from("Loopmasters"),
+        response.push(build_message_item(&transaction_id,
+            "Loopmasters",
             metadata_type::TITLE,
             0x05,
-            0x1a,
-            0x00
-        )));
+        ));
         response.push(DBMessage::new(
             transaction_id,
             DBRequestType::MenuFooter,
@@ -422,13 +411,11 @@ impl RenderController {
             build_message_header(&transaction_id),
         ]);
 
-        response.push(build_message_item(&transaction_id, (
-            DBField::from("Unknown"),
+        response.push(build_message_item(&transaction_id,
+            "Unknown",
             metadata_type::ALBUM,
             0x00,
-            0x10,
-            0x00,
-        )));
+        ));
 
         response.push(DBMessage::new(
             transaction_id,
@@ -445,21 +432,19 @@ impl RenderController {
             build_message_header(&transaction_id),
         ]);
 
-        let mut items: Vec<(&str, u8, u8)> = vec![("Demo Track 1", 0x05, 0x1a)];
+        let mut items: Vec<(&str, u8)> = vec![("Demo Track 1", 0x05)];
 
         // This seems to be related to only query one MenuItem
         if request.message.arguments[2 as usize].value > Bytes::from(vec![0x00, 0x00, 0x00, 0x01]) {
-            items.extend(vec![("Demo Track 2", 0x06, 0x1a)]);
+            items.extend(vec![("Demo Track 2", 0x06)]);
         }
 
         response.extend(items.iter().map(|item| {
-            build_message_item(&transaction_id, (
-                DBField::from(item.0),
+            build_message_item(&transaction_id,
+                item.0,
                 metadata_type::TITLE,
-                item.1,
-                item.2,
-                0x00
-            ))
+                item.1 as u32,
+            )
         }).collect());
 
         response.push(DBMessage::new(
@@ -479,182 +464,95 @@ impl RenderController {
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x01]),
-                    DBField::from([0x00, 0x00, 0x00, 0x05]),
-                    DBField::from([0x00, 0x00, 0x00, 0x1a]),
-                    DBField::from("Demo Track 1"),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::TITLE),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x01, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ]),
+                Arguments {
+                    entry_id1: 1,
+                    entry_id2: 5,
+                    entry_id4: 256,
+                    value1: "Demo Track 1",
+                    _type: metadata_type::TITLE,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x01]),
-                    DBField::from([0x00, 0x00, 0x00, 0x01]),
-                    DBField::from([0x00, 0x00, 0x00, 0x18]),
-                    DBField::from("Loopmasters"),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::ARTIST),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    entry_id1: 1,
+                    entry_id2: 1,
+                    value1: "Loopmasters",
+                    _type: metadata_type::ARTIST,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x01]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::ALBUM),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ]),
+                Arguments {
+                    entry_id1: 1,
+                    _type: metadata_type::ALBUM,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0xac]),  // 172, DURATION in seconds?
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::DURATION),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    entry_id2: 172,
+                    _type: metadata_type::DURATION,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x32, 0x00]),  // <- 12800, BPM VALUE?
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::BPM),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    entry_id2: 12800,
+                    _type: metadata_type::BPM,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x05]),
-                    DBField::from([0x00, 0x00, 0x00, 0x3c]),
-                    DBField::from("Tracks by www.loopmasters.com"),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::COMMENT),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    entry_id2: 5,
+                    value1: "Tracks by www.loopmasters.com",
+                    _type: metadata_type::COMMENT,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x01]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::KEY),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    entry_id1: 1,
+                    _type: metadata_type::KEY,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::RATING),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    _type: metadata_type::RATING,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::COLOR_NONE),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    _type: metadata_type::COLOR_NONE,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
-                ArgumentCollection::new(vec![
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from([0x00, 0x00, 0x00, 0x02]),
-                    DBField::from(""),
-                    DBField::from(metadata_type::GENRE),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                    DBField::from([0x00, 0x00, 0x00, 0x00]),
-                ])
+                Arguments {
+                    _type: metadata_type::GENRE,
+                    ..Default::default()
+                },
             ),
             DBMessage::new(
                 transaction_id,
@@ -674,112 +572,59 @@ impl RenderController {
         resp.push(DBMessage::new(
             transaction_id.clone(),
             DBRequestType::MenuItem,
-            ArgumentCollection::new(vec![
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x01]),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from(metadata_type::TITLE),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x01, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-            ])
+            Arguments {
+                _type: metadata_type::TITLE,
+                entry_id2: 1,
+                ..Default::default()
+            },
         ));
 
         resp.push(DBMessage::new(
             transaction_id.clone(),
             DBRequestType::MenuItem,
-            ArgumentCollection::new(vec![
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0xac]),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from(metadata_type::DURATION),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-            ])
+            Arguments {
+                _type: metadata_type::DURATION,
+                entry_id2: 172,
+                ..Default::default()
+            },
         ));
         resp.push(DBMessage::new(
             transaction_id.clone(),
             DBRequestType::MenuItem,
-            ArgumentCollection::new(vec![
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x32, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from(metadata_type::BPM),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-            ])
+            Arguments {
+                _type: metadata_type::BPM,
+                entry_id2: 12800,
+                ..Default::default()
+            },
         ));
         resp.push(DBMessage::new(
             transaction_id.clone(),
             DBRequestType::MenuItem,
-            ArgumentCollection::new(vec![
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x3c]),
-                DBField::from("Tracks by www.loopmasters.com"),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from(metadata_type::COMMENT),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-            ]),
+            Arguments {
+                _type: metadata_type::COMMENT,
+                value1: "Tracks by www.loopmasters.com",
+                ..Default::default()
+            },
         ));
         resp.push(DBMessage::new(
             transaction_id.clone(),
             DBRequestType::MenuItem,
-            ArgumentCollection::new(vec![
-                DBField::from([0x00, 0x69, 0x47, 0xa8]),
-                DBField::from([0x00, 0x00, 0x00, 0x05]),
-                DBField::from([0x00, 0x00, 0x00, 0x7a]),
-                DBField::from("C:/Users/Snaajf/Music/PioneerDJ/Demo Tracks/Demo Track 1.mp3"),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-            ])
+            Arguments {
+                _type: metadata_type::MOUNT_PATH,
+                entry_id1: 6899624,
+                entry_id2: 5,
+                value1: "/home/jonas/Music/PioneerDJ/Demo Tracks/Demo Track 1.mp3",
+                ..Default::default()
+            },
         ));
-
         resp.push(DBMessage::new(
             transaction_id.clone(),
             DBRequestType::MenuItem,
-            ArgumentCollection::new(vec![
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x01]),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from([0x00, 0x00, 0x00, 0x02]),
-                DBField::from(""),
-                DBField::from([0x00, 0x00, 0x00, 0x2f]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x00]),
-            ])
+            Arguments {
+                _type: metadata_type::UNKNOWN1,
+                entry_id2: 1,
+                ..Default::default()
+            },
         ));
 
         resp.push(DBMessage::new(
@@ -1114,6 +959,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "matches against hardcoded, should be enabled when we have a database."]
     fn test_mount_info_dialog() {
         let dialog = fixtures::mount_info_request_dialog();
         let mut context = context();

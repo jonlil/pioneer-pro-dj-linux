@@ -7,6 +7,7 @@ use std::net::Ipv4Addr;
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
+use super::metadata_type::{MetadataType, ROOT_ARTIST};
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
@@ -50,18 +51,61 @@ pub struct DBMessage {
     pub arguments: ArgumentCollection,
 }
 
+pub struct Arguments<'a> {
+    pub entry_id1: u32,
+    pub entry_id2: u32,
+    pub entry_id3: u32,
+    pub entry_id4: u32,
+    pub value1: &'a str,
+    pub value2: &'a str,
+    pub _type: MetadataType,
+}
+
+impl<'a> Default for Arguments<'a> {
+    fn default() -> Self {
+        Self {
+            entry_id1: 0,
+            entry_id2: 0,
+            entry_id3: 0,
+            entry_id4: 0,
+            value1: "",
+            value2: "",
+            _type: ROOT_ARTIST,
+        }
+    }
+}
+
+impl<'a> From<Arguments<'a>> for ArgumentCollection {
+    fn from(arguments: Arguments) -> ArgumentCollection {
+        ArgumentCollection::new(vec![
+            DBField::from(arguments.entry_id1.to_be_bytes()),
+            DBField::from(arguments.entry_id2.to_be_bytes()),
+            DBField::from((arguments.value1.encode_utf16().count() * 2 + 2) as u32),
+            DBField::from(arguments.value1),
+            DBField::from((arguments.value2.encode_utf16().count() * 2 + 2) as u32),
+            DBField::from(arguments.value2),
+            DBField::from(arguments._type),
+            DBField::from(0u32),
+            DBField::from(arguments.entry_id3.to_be_bytes()),
+            DBField::from(0u32),
+            DBField::from(arguments.entry_id4.to_be_bytes()),
+            DBField::from(0u32),
+        ])
+    }
+}
+
 impl DBMessage {
     const MAGIC: [u8; 4] = [0x87, 0x23, 0x49, 0xae];
 
-    pub fn new(
+    pub fn new<T: Into<ArgumentCollection>>(
         transaction_id: DBField,
         request_type: DBRequestType,
-        arguments: ArgumentCollection
+        arguments: T
     ) -> DBMessage {
         DBMessage {
             transaction_id,
             request_type,
-            arguments,
+            arguments: arguments.into(),
         }
     }
 
@@ -725,6 +769,7 @@ mod test {
     use super::super::fixtures;
     use pretty_assertions::assert_eq;
     use super::super::db_field::{DBField, DBFieldType, Binary};
+    use crate::rekordbox::metadata_type::ARTIST;
 
     #[test]
     fn extract_magic_from_db_message() {
@@ -1050,5 +1095,33 @@ mod test {
             ])).is_ok(),
             true,
         );
+    }
+
+    #[test]
+    fn it_can_decode_arguments_into_argument_collection() {
+        let argument = Arguments {
+            value1: "Loopmasters",
+            value2: "",
+            entry_id1: 1,
+            entry_id2: 2,
+            _type: ARTIST,
+            entry_id3: 3,
+            entry_id4: 0,
+        };
+
+        assert_eq!(ArgumentCollection::from(argument), ArgumentCollection::new(vec![
+            DBField::from(1u32),
+            DBField::from(2u32),
+            DBField::from(0x18 as u32),
+            DBField::from("Loopmasters"),
+            DBField::from(2u32),
+            DBField::from(""),
+            DBField::from(ARTIST),
+            DBField::from(0u32),
+            DBField::from(3u32),
+            DBField::from(0u32),
+            DBField::from(0u32),
+            DBField::from(0u32),
+        ]));
     }
 }

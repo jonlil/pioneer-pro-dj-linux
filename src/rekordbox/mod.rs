@@ -41,3 +41,4 @@ pub use server::Database as Database;
 pub use server::ApplicationEvent as Event;
 use rpc::server as rpc_server;
 use library::DBLibraryServer;
+pub use packets::DBMessage;
