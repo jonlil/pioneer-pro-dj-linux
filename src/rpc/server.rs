@@ -6,7 +6,7 @@ use tokio::net::UdpSocket;
 use tokio::stream::StreamExt;
 use futures::{SinkExt};
 
-use super::packets::{*, self as rpc_packages};
+use super::packets::{*, self as rpc_packages, NfsLookupReply};
 use super::codec::RpcBytesCodec;
 use super::events::{EventHandler, RpcResult};
 use std::path::PathBuf;
@@ -85,33 +85,44 @@ struct RpcNfsProgramHandler {
     path: PathBuf,
 }
 
+#[derive(Debug)]
+enum NfsProcedureError {
+    FileDoesNotExist,
+    NotImplemented,
+}
+
+impl From<std::io::Error> for NfsProcedureError {
+    fn from(_error: std::io::Error) -> NfsProcedureError {
+        NfsProcedureError::FileDoesNotExist
+    }
+}
+
 impl RpcNfsProgramHandler {
     fn new() -> Self {
         Self {
-            path: PathBuf::new(),
+            path: PathBuf::from("/"),
         }
     }
 
-    fn lookup(&mut self, lookup: &rpc_packages::NfsLookup) {
-        dbg!(lookup);
-        self.path.push(lookup.filename());
+    fn lookup(&mut self, lookup: &rpc_packages::NfsLookup) -> Result<NfsLookupReply, NfsProcedureError> {
+        let mut temp_path = self.path.clone();
+        temp_path.push(lookup.filename());
 
-        match std::fs::metadata(self.path.as_path()) {
+        match std::fs::metadata(temp_path.as_path()) {
             Ok(metadata) => {
-                dbg!(metadata);
+                self.path = temp_path;
+                Ok(NfsLookupReply::from(metadata))
             },
-            Err(err) => {
-                dbg!(err);
-            },
-        };
+            Err(err) => Err(err.into()),
+        }
     }
 
-    fn call_procedure(&mut self, call: &RpcCall) {
+    fn call_procedure(&mut self, call: &RpcCall) -> Result<RpcReplyMessage, NfsProcedureError> {
         match call.procedure() {
             RpcProcedure::NfsLookup(lookup) => {
-                self.lookup(lookup);
-            }
-            _ => {},
+                Ok(RpcReplyMessage::NfsLookup(self.lookup(lookup)?))
+            },
+            _ => Err(NfsProcedureError::NotImplemented),
         }
     }
 
@@ -122,7 +133,22 @@ impl RpcNfsProgramHandler {
                     dbg!(&rpc_message);
                     match rpc_message.message() {
                         RpcMessageType::Call(call) => {
-                            self.call_procedure(call);
+                            let response = match self.call_procedure(call) {
+                                Ok(rpc_reply) => {
+                                    socket.send((RpcMessage::new(
+                                        rpc_message.transaction_id(),
+                                        RpcMessageType::Reply(RpcReply {
+                                            verifier: RpcAuth::Null,
+                                            reply_state: RpcReplyState::Accepted,
+                                            accept_state: RpcAcceptState::Success,
+                                            data: rpc_reply,
+                                        })
+                                    ), address)).await;
+                                },
+                                Err(err) => {
+                                    eprintln!("{:?}", err);
+                                }
+                            };
                         },
                         _ => {},
                     }
@@ -222,6 +248,7 @@ fn get_ipv4_socket_addr(port: u16) -> SocketAddr {
 mod test {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+    use std::path::Path;
     use bytes::Bytes;
     use std::io::{Error, ErrorKind};
 

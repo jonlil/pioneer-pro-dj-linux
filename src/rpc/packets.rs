@@ -297,6 +297,21 @@ impl ExportListEntry {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum NfsStatus {
+    Ok,
+}
+
+impl From<NfsStatus> for Bytes {
+    fn from(status: NfsStatus) -> Bytes {
+        let mut buffer = BytesMut::new();
+        buffer.put_u32(match status {
+            NfsStatus::Ok => 0u32,
+        });
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct MountMntReply {
     status: u32,
     fhandle: FileHandle,
@@ -322,8 +337,68 @@ impl From<MountMntReply> for Bytes {
     }
 }
 
+impl From<std::fs::Metadata> for NfsLookupReply {
+    fn from(metadata: std::fs::Metadata) -> Self {
+        Self {
+            status: NfsStatus::Ok,
+            fhandle: FileHandle::new([0u8; 32]),
+            _type: match metadata.is_dir() {
+                true => FileType::Directory,
+                false => FileType::File,
+            },
+            mode: FileMode {
+                name: 0x00,
+                user: 0x00,
+                group: 0x00,
+                other: 0x00,
+            },
+            nlink: 0,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            blocksize: 0,
+            rdev: 0,
+            blocks: 0,
+            fsid: 0,
+            file_id: 0,
+            atime: metadata.accessed().unwrap(),
+            mtime: metadata.modified().unwrap(),
+            ctime: metadata.created().unwrap(),
+        }
+    }
+}
+
+impl Default for NfsLookupReply {
+    fn default() -> Self {
+        Self {
+            status: NfsStatus::Ok,
+            fhandle: FileHandle::new([0u8; 32]),
+            _type: FileType::Directory,
+            mode: FileMode {
+                name: 0x00,
+                user: 0x00,
+                group: 0x00,
+                other: 0x00,
+            },
+            nlink: 0,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            blocksize: 0,
+            rdev: 0,
+            blocks: 0,
+            fsid: 0,
+            file_id: 0,
+            atime: SystemTime::now(),
+            mtime: SystemTime::now(),
+            ctime: SystemTime::now(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct NfsLookupReply {
+    status: NfsStatus,
     fhandle: FileHandle,
     _type: FileType,
     mode: FileMode,
@@ -363,8 +438,10 @@ impl From<NfsLookupReply> for Bytes {
     fn from(reply: NfsLookupReply) -> Bytes {
         let mut buffer = BytesMut::with_capacity(104);
 
-        buffer.put(Bytes::from(reply.fhandle));
-        buffer.put(Bytes::from(reply._type));
+        buffer.extend(Bytes::from(reply.status));
+        buffer.extend(Bytes::from(reply.fhandle));
+        buffer.extend(Bytes::from(reply._type));
+        buffer.extend(Bytes::from(reply.mode));
         buffer.put_u32(reply.nlink);
         buffer.put_u32(reply.uid);
         buffer.put_u32(reply.gid);
@@ -372,6 +449,7 @@ impl From<NfsLookupReply> for Bytes {
         buffer.put_u32(reply.blocksize);
         buffer.put_u32(reply.rdev);
         buffer.put_u32(reply.blocks);
+        buffer.put_u32(reply.fsid);
         buffer.put_u32(reply.file_id);
         buffer.extend(system_time_to_bytes(reply.atime));
         buffer.extend(system_time_to_bytes(reply.mtime));
@@ -389,6 +467,17 @@ pub struct FileMode {
     other: u8,
 }
 
+impl From<FileMode> for Bytes {
+    fn from(file_mode: FileMode) -> Bytes {
+        let mut buffer = BytesMut::with_capacity(4);
+        buffer.put_u8(file_mode.name);
+        buffer.put_u8(file_mode.user);
+        buffer.put_u8(file_mode.group);
+        buffer.put_u8(file_mode.other);
+        buffer.freeze()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum FileType {
     File, // 1u32
@@ -397,10 +486,10 @@ enum FileType {
 
 impl From<FileType> for Bytes {
     fn from(file_type: FileType) -> Self {
-        let mut buffer = BytesMut::with_capacity(1);
-        buffer.put_u8(match file_type {
-            FileType::File => 1u8,
-            FileType::Directory => 2u8,
+        let mut buffer = BytesMut::with_capacity(4);
+        buffer.put_u32(match file_type {
+            FileType::File => 1u32,
+            FileType::Directory => 2u32,
         });
         buffer.freeze()
     }
@@ -651,10 +740,8 @@ impl Decoder for NfsLookup {
         let contents = String::from_utf16(&contents)
             .map_err(|_| nom::Err::Error((input, MapRes)))?;
 
-        let path = Path::new(&format!("/{}", contents)).to_path_buf();
-
         Ok((input, NfsLookup {
-            filename: path,
+            filename: Path::new(&contents).to_path_buf(),
             fhandle: file_handle,
         }))
     }
@@ -1045,6 +1132,18 @@ mod test {
     #[test]
     fn it_can_decode_lookup_call() {
         let call = Bytes::from(b"\0\0\0\"\0\0\0\0\0\0\0\x02\0\x01\x86\xa3\0\0\0\x02\0\0\0\x04\0\0\0\x01\0\0\0\x14\xf0\xbcq\x07\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x03\x01\0\0\0\0\x1bX\0\0\0\0\x11\x04\x01\0\0\0\0\x05\0\0\0\nU\0s\0e\0r\0s\0\0\0".to_vec());
-        assert_eq!(RpcMessage::decode(&call).is_ok(), true);
+        let nfs_lookup = RpcMessage::decode(&call);
+        assert_eq!(nfs_lookup.is_ok(), true);
+    }
+
+    #[test]
+    fn it_can_encode_nfs_lookup_reply() {
+        let reply = NfsLookupReply {
+            _type: FileType::File,
+            ..Default::default()
+        };
+
+        assert_eq!(104, Bytes::from(reply).len());
     }
 }
+
