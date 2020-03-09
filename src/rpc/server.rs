@@ -104,6 +104,10 @@ impl RpcNfsProgramHandler {
         }
     }
 
+    fn reset_path(&mut self) {
+        self.path = PathBuf::from("/");
+    }
+
     fn lookup(&mut self, lookup: &rpc_packages::NfsLookup) -> Result<NfsLookupReply, NfsProcedureError> {
         let mut temp_path = self.path.clone();
         temp_path.push(lookup.filename());
@@ -111,9 +115,16 @@ impl RpcNfsProgramHandler {
         match std::fs::metadata(temp_path.as_path()) {
             Ok(metadata) => {
                 self.path = temp_path;
+                if metadata.is_file() {
+                    self.reset_path();
+                }
+
                 Ok(NfsLookupReply::from(metadata))
             },
-            Err(err) => Err(err.into()),
+            Err(err) => {
+                self.reset_path();
+                Err(err.into())
+            },
         }
     }
 
