@@ -11,8 +11,6 @@ pub const APPLICATION_NAME: [u8; 20] = [
 ];
 
 pub mod server;
-
-pub mod event;
 pub mod player;
 pub mod util;
 
@@ -43,3 +41,4 @@ pub use server::Database as Database;
 pub use server::ApplicationEvent as Event;
 use rpc::server as rpc_server;
 use library::DBLibraryServer;
+pub use packets::DBMessage;

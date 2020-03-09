@@ -6,9 +6,10 @@ use tokio::net::UdpSocket;
 use tokio::stream::StreamExt;
 use futures::{SinkExt};
 
-use super::packets::*;
+use super::packets::{*, self as rpc_packages, NfsLookupReply};
 use super::codec::RpcBytesCodec;
-use super::events::EventHandler;
+use super::events::{EventHandler, RpcResult};
+use std::path::PathBuf;
 
 struct RpcProcedureRouter<T>
     where T: EventHandler,
@@ -18,57 +19,155 @@ struct RpcProcedureRouter<T>
     handler: Arc<T>,
 }
 
+#[derive(Debug)]
+enum RpcServerError {
+    ProgramNotImplemented,
+    ReplyNotAllowed,
+    IOError(std::io::Error),
+}
+
+fn serialize_rpc_reply_message(reply: RpcReplyMessage, transaction_id: u32) -> RpcMessage {
+    RpcMessage::new(
+        transaction_id,
+        RpcMessageType::Reply(RpcReply {
+            verifier: RpcAuth::Null,
+            reply_state: RpcReplyState::Accepted,
+            accept_state: RpcAcceptState::Success,
+            data: reply,
+        })
+    )
+}
+
 fn rpc_procedure_router<T: EventHandler>(
     request: RpcMessage,
     address: SocketAddr,
     handler: Arc<T>,
-) -> Result<(RpcMessage, SocketAddr), std::io::Error> {
+) -> Result<(RpcMessage, SocketAddr), RpcServerError> {
     let transaction_id = request.xid;
     match request.message() {
         RpcMessageType::Call(call) => {
-            match handler.handle_event(call) {
-                Ok(reply) => {
-                    Ok((
-                        RpcMessage::new(
-                            transaction_id,
-                            RpcMessageType::Reply(RpcReply {
-                                verifier: RpcAuth::Null,
-                                reply_state: RpcReplyState::Accepted,
-                                accept_state: RpcAcceptState::Success,
-                                data: reply,
-                            })
-                        ),
-                        address,
-                    ))
-                },
-                Err(e) => Err(e),
+            match handler.handle_event(&call) {
+                Some(Ok(reply)) => Ok((serialize_rpc_reply_message(reply, transaction_id), address)),
+                Some(Err(e)) => Err(RpcServerError::IOError(e)),
+                None => Err(RpcServerError::ProgramNotImplemented),
             }
         },
-        RpcMessageType::Reply(_) => panic!("RpcReply not allowed in call processor."),
+        RpcMessageType::Reply(_) => Err(RpcServerError::ReplyNotAllowed),
     }
 }
 
 /// Make this server handle generic program handlers.
+///
+/// This server will crash directly it is unable to process a message in either direction.
 async fn rpc_program_server<T: EventHandler>(
-    socket: UdpSocket,
+    mut socket: UdpFramed<RpcBytesCodec>,
     handler: Arc<T>,
-) -> Result<(), std::io::Error> {
-    let mut socket = UdpFramed::new(socket, RpcBytesCodec::new());
+) -> Result<(), String> {
 
-    while let Some(result) = socket.next().await {
-        match result {
-            Ok((request, address)) => match rpc_procedure_router(request, address, handler.clone()) {
-                Ok(message) => match socket.send(message).await {
-                    Ok(_) => {},
-                    Err(err) => eprintln!("failed sending rpc response; error = {}", err),
-                },
-                Err(err) => eprintln!("failed routing rpc procedure; error = {}", err),
+    while let Some(package) = socket.next().await {
+        let handler = handler.clone();
+
+        match package {
+            Ok((request, address)) => {
+                let message = rpc_procedure_router(request, address, handler.clone())
+                    .map_err(|err| format!("failed processing RPC Message into reply; error = {:?}", err))?;
+                socket.send(message).await
+                    .map_err(|_| String::from("Failed sending on socket"))?;
             },
-            Err(err) => eprintln!("error decoding rpc message from socket; error = {}", err),
+            Err(err) => eprintln!("error decoding bytes into RPC Message; err = {}", err),
         }
     }
 
     Ok(())
+}
+
+struct RpcNfsProgramHandler {
+    path: PathBuf,
+}
+
+#[derive(Debug)]
+enum NfsProcedureError {
+    FileDoesNotExist,
+    NotImplemented,
+}
+
+impl From<std::io::Error> for NfsProcedureError {
+    fn from(_error: std::io::Error) -> NfsProcedureError {
+        NfsProcedureError::FileDoesNotExist
+    }
+}
+
+impl RpcNfsProgramHandler {
+    fn new() -> Self {
+        Self {
+            path: PathBuf::from("/"),
+        }
+    }
+
+    fn reset_path(&mut self) {
+        self.path = PathBuf::from("/");
+    }
+
+    fn lookup(&mut self, lookup: &rpc_packages::NfsLookup) -> Result<NfsLookupReply, NfsProcedureError> {
+        let mut temp_path = self.path.clone();
+        temp_path.push(lookup.filename());
+
+        match std::fs::metadata(temp_path.as_path()) {
+            Ok(metadata) => {
+                self.path = temp_path;
+                if metadata.is_file() {
+                    self.reset_path();
+                }
+
+                Ok(NfsLookupReply::from(metadata))
+            },
+            Err(err) => {
+                self.reset_path();
+                Err(err.into())
+            },
+        }
+    }
+
+    fn call_procedure(&mut self, call: &RpcCall) -> Result<RpcReplyMessage, NfsProcedureError> {
+        match call.procedure() {
+            RpcProcedure::NfsLookup(lookup) => {
+                Ok(RpcReplyMessage::NfsLookup(self.lookup(lookup)?))
+            },
+            _ => Err(NfsProcedureError::NotImplemented),
+        }
+    }
+
+    async fn run(&mut self, mut socket: UdpFramed<RpcBytesCodec>) {
+        while let Some(package) = socket.next().await {
+            match package {
+                Ok((rpc_message, address)) => {
+                    dbg!(&rpc_message);
+                    match rpc_message.message() {
+                        RpcMessageType::Call(call) => {
+                            let response = match self.call_procedure(call) {
+                                Ok(rpc_reply) => {
+                                    socket.send((RpcMessage::new(
+                                        rpc_message.transaction_id(),
+                                        RpcMessageType::Reply(RpcReply {
+                                            verifier: RpcAuth::Null,
+                                            reply_state: RpcReplyState::Accepted,
+                                            accept_state: RpcAcceptState::Success,
+                                            data: rpc_reply,
+                                        })
+                                    ), address)).await;
+                                },
+                                Err(err) => {
+                                    eprintln!("{:?}", err);
+                                }
+                            };
+                        },
+                        _ => {},
+                    }
+                },
+                Err(err) => {},
+            }
+        }
+    }
 }
 
 pub struct PortmapServer {
@@ -99,11 +198,33 @@ impl PortmapServer {
                     let handler = handler.clone();
                     let allocated_rpc_socket = UdpSocket::bind(&get_ipv4_socket_addr(0)).await?;
                     let local_addr = allocated_rpc_socket.local_addr()?;
+                    let allocated_rpc_socket = UdpFramed::new(allocated_rpc_socket, RpcBytesCodec::new());
 
-                    // Spawn RPC Program in thread to handle multiple concurrent clients
-                    tokio::spawn(async move {
-                        rpc_program_server(allocated_rpc_socket, handler).await
-                    });
+                    match rpc_message.message() {
+                        RpcMessageType::Call(call) => {
+                            match call.procedure() {
+                                RpcProcedure::PortmapGetport(getport) => {
+                                    match getport.program() {
+                                        RpcProgram::Nfs => {
+                                            tokio::spawn(async move {
+                                                let mut program_handler = RpcNfsProgramHandler::new();
+                                                program_handler.run(allocated_rpc_socket).await;
+                                            });
+                                        },
+                                        _ => {
+                                            // Spawn RPC Program in thread to handle multiple concurrent clients
+                                            tokio::spawn(async move {
+                                                rpc_program_server(allocated_rpc_socket, handler).await
+                                            });
+                                        },
+                                    }
+                                },
+                                _ => {},
+                            }
+                        },
+                        _ => {},
+                    };
+
 
                     // Prepare portmap response
                     let portmap_response = RpcMessage::new(
@@ -138,23 +259,24 @@ fn get_ipv4_socket_addr(port: u16) -> SocketAddr {
 mod test {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+    use std::path::Path;
     use bytes::Bytes;
-    use std::io::{Error, ErrorKind, self};
+    use std::io::{Error, ErrorKind};
 
     struct Context;
     struct MockEventHandler;
     impl EventHandler for MockEventHandler {
-        fn on_event(&self, procedure: &RpcProcedure, _call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+        fn on_event(&self, procedure: &RpcProcedure, _call: &RpcCall) -> RpcResult {
             let context = Context;
 
             match procedure {
                 RpcProcedure::MountExport => {
-                    match mount_export_rpc_callback(context) {
+                    Some(match mount_export_rpc_callback(context) {
                         Ok(reply) => Ok(RpcReplyMessage::MountExport(reply)),
                         Err(err) => Err(err),
-                    }
+                    })
                 },
-                _ => Err(Error::new(ErrorKind::InvalidInput, "failed")),
+                _ => Some(Err(Error::new(ErrorKind::InvalidInput, "failed"))),
             }
         }
     }

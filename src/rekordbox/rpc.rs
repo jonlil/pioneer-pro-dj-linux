@@ -1,5 +1,5 @@
 use std::io::{Error, ErrorKind};
-use crate::rpc::events::EventHandler as RpcEventHandler;
+use crate::rpc::events::{EventHandler as RpcEventHandler, RpcResult};
 use crate::rpc::PortmapServer;
 use crate::rpc::packets::*;
 use crate::rekordbox::ServerState;
@@ -33,7 +33,7 @@ pub async fn server(state_ref: Arc<Mutex<ServerState>>) -> Result<(), std::io::E
 }
 
 fn mount_mnt_rpc_callback(_context: Context, _data: &MountMnt) -> Result<MountMntReply, std::io::Error> {
-    Ok(MountMntReply::new(0, [0x00; 32]))
+    Ok(MountMntReply::new(0, FileHandle::new([0x00; 32])))
 }
 
 fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::io::Error> {
@@ -44,7 +44,7 @@ fn mount_export_rpc_callback(context: Context) -> Result<MountExportReply, std::
             return Ok(MountExportReply {
                 export_list_entries: vec![
                     ExportListEntry::new(
-                        String::from("/C/"),
+                        String::from("/"),
                         vec![
                             address,
                         ],
@@ -69,7 +69,7 @@ impl EventHandler {
 }
 
 impl RpcEventHandler for EventHandler {
-    fn on_event(&self, procedure: &RpcProcedure, call: &RpcCall) -> Result<RpcReplyMessage, std::io::Error> {
+    fn on_event(&self, procedure: &RpcProcedure, call: &RpcCall) -> RpcResult {
         let context = Context {
             call: call,
             state: &self.state,
@@ -77,18 +77,18 @@ impl RpcEventHandler for EventHandler {
 
         match procedure {
             RpcProcedure::MountExport => {
-                match mount_export_rpc_callback(context) {
+                Some(match mount_export_rpc_callback(context) {
                     Ok(reply) => Ok(RpcReplyMessage::MountExport(reply)),
                     Err(err) => Err(err),
-                }
+                })
             },
             RpcProcedure::MountMnt(data) => {
-                match mount_mnt_rpc_callback(context, data) {
+                Some(match mount_mnt_rpc_callback(context, data) {
                     Ok(reply) => Ok(RpcReplyMessage::MountMnt(reply)),
                     Err(err) => Err(err),
-                }
+                })
             },
-            _ => Err(Error::new(ErrorKind::InvalidInput, "RpcProcedure not implemented")),
+            _ => None,
         }
     }
 }

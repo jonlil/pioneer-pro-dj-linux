@@ -1,9 +1,11 @@
-use nom::number::complete::{be_u32, be_u16, le_u16};
+use nom::number::complete::{be_u32, be_u16, le_u16, be_u8};
 use nom::multi::count;
 use nom::IResult;
-use nom::error::ErrorKind::Switch;
+use nom::error::ErrorKind::{Switch, MapRes};
 use bytes::{BytesMut, Bytes, BufMut};
 use std::convert::TryFrom;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -137,6 +139,10 @@ impl RpcCall {
     pub fn procedure(&self) -> &RpcProcedure {
         &self.procedure
     }
+
+    pub fn program(&self) -> &RpcProgram {
+        &self.program
+    }
 }
 
 impl Decoder for RpcCall {
@@ -195,6 +201,7 @@ pub enum RpcReplyMessage {
     PortmapGetport(PortmapGetportReply),
     MountExport(MountExportReply),
     MountMnt(MountMntReply),
+    NfsLookup(NfsLookupReply),
 }
 
 impl From<RpcReplyMessage> for Bytes {
@@ -203,6 +210,7 @@ impl From<RpcReplyMessage> for Bytes {
             RpcReplyMessage::PortmapGetport(reply) => Bytes::from(reply),
             RpcReplyMessage::MountExport(reply)    => Bytes::from(reply),
             RpcReplyMessage::MountMnt(reply)       => Bytes::from(reply),
+            RpcReplyMessage::NfsLookup(reply)      => Bytes::from(reply),
         }
     }
 }
@@ -289,13 +297,28 @@ impl ExportListEntry {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum NfsStatus {
+    Ok,
+}
+
+impl From<NfsStatus> for Bytes {
+    fn from(status: NfsStatus) -> Bytes {
+        let mut buffer = BytesMut::new();
+        buffer.put_u32(match status {
+            NfsStatus::Ok => 0u32,
+        });
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct MountMntReply {
     status: u32,
-    fhandle: [u8; 32],
+    fhandle: FileHandle,
 }
 
 impl MountMntReply {
-    pub fn new(status: u32, fhandle: [u8; 32]) -> MountMntReply {
+    pub fn new(status: u32, fhandle: FileHandle) -> MountMntReply {
         MountMntReply {
             status,
             fhandle,
@@ -308,9 +331,167 @@ impl From<MountMntReply> for Bytes {
         let mut buf = BytesMut::new();
 
         buf.extend(reply.status.to_be_bytes().to_vec());
-        buf.extend(reply.fhandle.to_vec());
+        buf.extend(Bytes::from(reply.fhandle).to_vec());
 
         Bytes::from(buf)
+    }
+}
+
+impl From<std::fs::Metadata> for NfsLookupReply {
+    fn from(metadata: std::fs::Metadata) -> Self {
+        Self {
+            status: NfsStatus::Ok,
+            fhandle: FileHandle::new([0u8; 32]),
+            _type: match metadata.is_dir() {
+                true => FileType::Directory,
+                false => FileType::File,
+            },
+            mode: FileMode {
+                name: 0x00,
+                user: 0x00,
+                group: 0x00,
+                other: 0x00,
+            },
+            nlink: 0,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            blocksize: 0,
+            rdev: 0,
+            blocks: 0,
+            fsid: 0,
+            file_id: 0,
+            atime: metadata.accessed().unwrap(),
+            mtime: metadata.modified().unwrap(),
+            ctime: metadata.created().unwrap(),
+        }
+    }
+}
+
+impl Default for NfsLookupReply {
+    fn default() -> Self {
+        Self {
+            status: NfsStatus::Ok,
+            fhandle: FileHandle::new([0u8; 32]),
+            _type: FileType::Directory,
+            mode: FileMode {
+                name: 0x00,
+                user: 0x00,
+                group: 0x00,
+                other: 0x00,
+            },
+            nlink: 0,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            blocksize: 0,
+            rdev: 0,
+            blocks: 0,
+            fsid: 0,
+            file_id: 0,
+            atime: SystemTime::now(),
+            mtime: SystemTime::now(),
+            ctime: SystemTime::now(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsLookupReply {
+    status: NfsStatus,
+    fhandle: FileHandle,
+    _type: FileType,
+    mode: FileMode,
+    nlink: u32,
+    uid: u32,
+    gid: u32,
+    size: u32,
+    blocksize: u32,
+    rdev: u32,
+    blocks: u32,
+    fsid: u32,
+    file_id: u32,
+    atime: SystemTime,
+    mtime: SystemTime,
+    ctime: SystemTime,
+}
+
+/// This method transforms std::time::SystemTime (u64)
+/// to a timeval type as defined in RFC 1094.
+fn system_time_to_bytes(time: SystemTime) -> Bytes {
+    match time.duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(n) => {
+            let mut buffer = BytesMut::with_capacity(8);
+
+            // RFC 1094 use 4 bytes for representing timestamp
+            let secs: [u8; 8] = n.as_secs().to_be_bytes();
+            buffer.extend(secs[4..=7].to_vec());
+            buffer.put_u32(0);
+
+            buffer.freeze()
+        },
+        Err(_err) => Bytes::from([0u8; 8].to_vec()),
+    }
+}
+
+impl From<NfsLookupReply> for Bytes {
+    fn from(reply: NfsLookupReply) -> Bytes {
+        let mut buffer = BytesMut::with_capacity(104);
+
+        buffer.extend(Bytes::from(reply.status));
+        buffer.extend(Bytes::from(reply.fhandle));
+        buffer.extend(Bytes::from(reply._type));
+        buffer.extend(Bytes::from(reply.mode));
+        buffer.put_u32(reply.nlink);
+        buffer.put_u32(reply.uid);
+        buffer.put_u32(reply.gid);
+        buffer.put_u32(reply.size);
+        buffer.put_u32(reply.blocksize);
+        buffer.put_u32(reply.rdev);
+        buffer.put_u32(reply.blocks);
+        buffer.put_u32(reply.fsid);
+        buffer.put_u32(reply.file_id);
+        buffer.extend(system_time_to_bytes(reply.atime));
+        buffer.extend(system_time_to_bytes(reply.mtime));
+        buffer.extend(system_time_to_bytes(reply.ctime));
+
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FileMode {
+    name: u8,
+    user: u8,
+    group: u8,
+    other: u8,
+}
+
+impl From<FileMode> for Bytes {
+    fn from(file_mode: FileMode) -> Bytes {
+        let mut buffer = BytesMut::with_capacity(4);
+        buffer.put_u8(file_mode.name);
+        buffer.put_u8(file_mode.user);
+        buffer.put_u8(file_mode.group);
+        buffer.put_u8(file_mode.other);
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum FileType {
+    File, // 1u32
+    Directory, // 2u32
+}
+
+impl From<FileType> for Bytes {
+    fn from(file_type: FileType) -> Self {
+        let mut buffer = BytesMut::with_capacity(4);
+        buffer.put_u32(match file_type {
+            FileType::File => 1u32,
+            FileType::Directory => 2u32,
+        });
+        buffer.freeze()
     }
 }
 
@@ -445,6 +626,7 @@ pub enum RpcProcedure {
     PortmapDump,
     PortmapCallResult,
     NfsNull,
+    NfsLookup(NfsLookup),
     MountMnt(MountMnt),
     MountExport,
     MountNull,
@@ -463,6 +645,10 @@ impl RpcProcedure {
             (RpcProgram::Portmap, 4u32) => Ok((input, RpcProcedure::PortmapDump)),
             (RpcProgram::Portmap, 5u32) => Ok((input, RpcProcedure::PortmapCallResult)),
             (RpcProgram::Portmap, _)    => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Nfs, 4)        => {
+                let (input, data) = NfsLookup::decode(&input)?;
+                Ok((input, RpcProcedure::NfsLookup(data)))
+            },
             (RpcProgram::Nfs, _)        => Err(nom::Err::Error((input, Switch))),
             (RpcProgram::Mount, 5u32)   => Ok((input, RpcProcedure::MountExport)),
             (RpcProgram::Mount, 1u32)   => {
@@ -502,11 +688,77 @@ impl Decoder for MountMnt {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct FileHandle {
+    data: Vec<u8>,
+}
+
+impl FileHandle {
+    pub fn new(data: [u8; 32]) -> Self {
+        Self {
+            data: data.to_vec(),
+        }
+    }
+}
+
+impl Decoder for FileHandle {
+    type Output = Self;
+
+    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+        let (input, fhandle) = count(be_u8, 32)(input)?;
+
+        Ok((input, Self { data: fhandle }))
+    }
+}
+
+impl From<FileHandle> for Bytes {
+    fn from(fhandle: FileHandle) -> Bytes {
+        Bytes::from(fhandle.data)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsLookup {
+    pub filename: PathBuf,
+    pub fhandle: FileHandle,
+}
+
+impl NfsLookup {
+    pub fn filename(&self) -> &PathBuf {
+        &self.filename
+    }
+}
+
+impl Decoder for NfsLookup {
+    type Output = Self;
+
+    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+        let (input, file_handle) = FileHandle::decode(input)?;
+
+        let (input, length) = be_u32(input)?;
+        let (input, contents) = count(le_u16, length as usize / 2)(input)?;
+
+        let contents = String::from_utf16(&contents)
+            .map_err(|_| nom::Err::Error((input, MapRes)))?;
+
+        Ok((input, NfsLookup {
+            filename: Path::new(&contents).to_path_buf(),
+            fhandle: file_handle,
+        }))
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct PortmapGetport {
     version: u32,
     program: RpcProgram,
     protocol: PortmapProtocol,
     port: u32,
+}
+
+impl PortmapGetport {
+    pub fn program(&self) -> &RpcProgram {
+        &self.program
+    }
 }
 
 impl Decoder for PortmapGetport {
@@ -870,10 +1122,28 @@ mod test {
                 data: RpcReplyMessage::MountMnt(
                     MountMntReply {
                         status: 0,
-                        fhandle: [0x00; 32],
+                        fhandle: FileHandle::new([0x00; 32]),
                     },
                 ),
             }),
         }));
     }
+
+    #[test]
+    fn it_can_decode_lookup_call() {
+        let call = Bytes::from(b"\0\0\0\"\0\0\0\0\0\0\0\x02\0\x01\x86\xa3\0\0\0\x02\0\0\0\x04\0\0\0\x01\0\0\0\x14\xf0\xbcq\x07\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x03\x01\0\0\0\0\x1bX\0\0\0\0\x11\x04\x01\0\0\0\0\x05\0\0\0\nU\0s\0e\0r\0s\0\0\0".to_vec());
+        let nfs_lookup = RpcMessage::decode(&call);
+        assert_eq!(nfs_lookup.is_ok(), true);
+    }
+
+    #[test]
+    fn it_can_encode_nfs_lookup_reply() {
+        let reply = NfsLookupReply {
+            _type: FileType::File,
+            ..Default::default()
+        };
+
+        assert_eq!(104, Bytes::from(reply).len());
+    }
 }
+

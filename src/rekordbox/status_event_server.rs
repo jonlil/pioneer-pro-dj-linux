@@ -64,7 +64,6 @@ impl StatusEventServer {
                 ))
             },
             StatusPacketType::LinkQuery => {
-                dbg!(&packet);
                 Some(StatusPacket::new(
                     StatusPacketType::LinkReply,
                     packet.unknown1,
