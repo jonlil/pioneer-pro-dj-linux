@@ -6,6 +6,7 @@ use bytes::{BytesMut, Bytes, BufMut};
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use std::fs::Metadata;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -202,6 +203,7 @@ pub enum RpcReplyMessage {
     MountExport(MountExportReply),
     MountMnt(MountMntReply),
     NfsLookup(NfsLookupReply),
+    NfsGetAttr(NfsGetAttrReply),
 }
 
 impl From<RpcReplyMessage> for Bytes {
@@ -211,6 +213,7 @@ impl From<RpcReplyMessage> for Bytes {
             RpcReplyMessage::MountExport(reply)    => Bytes::from(reply),
             RpcReplyMessage::MountMnt(reply)       => Bytes::from(reply),
             RpcReplyMessage::NfsLookup(reply)      => Bytes::from(reply),
+            RpcReplyMessage::NfsGetAttr(reply)     => Bytes::from(reply),
         }
     }
 }
@@ -337,11 +340,9 @@ impl From<MountMntReply> for Bytes {
     }
 }
 
-impl From<std::fs::Metadata> for NfsLookupReply {
+impl From<Metadata> for NfsFileAttributes {
     fn from(metadata: std::fs::Metadata) -> Self {
         Self {
-            status: NfsStatus::Ok,
-            fhandle: FileHandle::new([0u8; 32]),
             _type: match metadata.is_dir() {
                 true => FileType::Directory,
                 false => FileType::File,
@@ -349,8 +350,8 @@ impl From<std::fs::Metadata> for NfsLookupReply {
             mode: FileMode {
                 name: 0x00,
                 user: 0x00,
-                group: 0x00,
-                other: 0x00,
+                group: 81,
+                other: 24,
             },
             nlink: 0,
             uid: 0,
@@ -368,11 +369,9 @@ impl From<std::fs::Metadata> for NfsLookupReply {
     }
 }
 
-impl Default for NfsLookupReply {
+impl Default for NfsFileAttributes {
     fn default() -> Self {
         Self {
-            status: NfsStatus::Ok,
-            fhandle: FileHandle::new([0u8; 32]),
             _type: FileType::Directory,
             mode: FileMode {
                 name: 0x00,
@@ -396,24 +395,21 @@ impl Default for NfsLookupReply {
     }
 }
 
+impl Default for NfsLookupReply {
+    fn default() -> Self {
+        Self {
+            status: NfsStatus::Ok,
+            fhandle: FileHandle::new([0u8; 32]),
+            attributes: NfsFileAttributes::default(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct NfsLookupReply {
-    status: NfsStatus,
-    fhandle: FileHandle,
-    _type: FileType,
-    mode: FileMode,
-    nlink: u32,
-    uid: u32,
-    gid: u32,
-    size: u32,
-    blocksize: u32,
-    rdev: u32,
-    blocks: u32,
-    fsid: u32,
-    file_id: u32,
-    atime: SystemTime,
-    mtime: SystemTime,
-    ctime: SystemTime,
+    pub status: NfsStatus,
+    pub fhandle: FileHandle,
+    pub attributes: NfsFileAttributes,
 }
 
 /// This method transforms std::time::SystemTime (u64)
@@ -440,20 +436,30 @@ impl From<NfsLookupReply> for Bytes {
 
         buffer.extend(Bytes::from(reply.status));
         buffer.extend(Bytes::from(reply.fhandle));
-        buffer.extend(Bytes::from(reply._type));
-        buffer.extend(Bytes::from(reply.mode));
-        buffer.put_u32(reply.nlink);
-        buffer.put_u32(reply.uid);
-        buffer.put_u32(reply.gid);
-        buffer.put_u32(reply.size);
-        buffer.put_u32(reply.blocksize);
-        buffer.put_u32(reply.rdev);
-        buffer.put_u32(reply.blocks);
-        buffer.put_u32(reply.fsid);
-        buffer.put_u32(reply.file_id);
-        buffer.extend(system_time_to_bytes(reply.atime));
-        buffer.extend(system_time_to_bytes(reply.mtime));
-        buffer.extend(system_time_to_bytes(reply.ctime));
+        buffer.extend(Bytes::from(reply.attributes));
+
+        buffer.freeze()
+    }
+}
+
+impl From<NfsFileAttributes> for Bytes {
+    fn from(attributes: NfsFileAttributes) -> Bytes {
+        let mut buffer = BytesMut::new();
+
+        buffer.extend(Bytes::from(attributes._type));
+        buffer.extend(Bytes::from(attributes.mode));
+        buffer.put_u32(attributes.nlink);
+        buffer.put_u32(attributes.uid);
+        buffer.put_u32(attributes.gid);
+        buffer.put_u32(attributes.size);
+        buffer.put_u32(attributes.blocksize);
+        buffer.put_u32(attributes.rdev);
+        buffer.put_u32(attributes.blocks);
+        buffer.put_u32(attributes.fsid);
+        buffer.put_u32(attributes.file_id);
+        buffer.extend(system_time_to_bytes(attributes.atime));
+        buffer.extend(system_time_to_bytes(attributes.mtime));
+        buffer.extend(system_time_to_bytes(attributes.ctime));
 
         buffer.freeze()
     }
@@ -626,6 +632,7 @@ pub enum RpcProcedure {
     PortmapDump,
     PortmapCallResult,
     NfsNull,
+    NfsGetAttr(NfsGetAttr),
     NfsLookup(NfsLookup),
     MountMnt(MountMnt),
     MountExport,
@@ -645,7 +652,11 @@ impl RpcProcedure {
             (RpcProgram::Portmap, 4u32) => Ok((input, RpcProcedure::PortmapDump)),
             (RpcProgram::Portmap, 5u32) => Ok((input, RpcProcedure::PortmapCallResult)),
             (RpcProgram::Portmap, _)    => Err(nom::Err::Error((input, Switch))),
-            (RpcProgram::Nfs, 4)        => {
+            (RpcProgram::Nfs, 1) => {
+                let (input, data) = NfsGetAttr::decode(input)?;
+                Ok((input, RpcProcedure::NfsGetAttr(data)))
+            },
+            (RpcProgram::Nfs, 4) => {
                 let (input, data) = NfsLookup::decode(&input)?;
                 Ok((input, RpcProcedure::NfsLookup(data)))
             },
@@ -698,6 +709,14 @@ impl FileHandle {
             data: data.to_vec(),
         }
     }
+
+    pub fn ino(&self) -> u64 {
+        let mut data = [0u8; 8];
+        for (index, value) in self.data[0..=7].into_iter().enumerate() {
+            data[index] = *value;
+        }
+        u64::from_ne_bytes(data)
+    }
 }
 
 impl Decoder for FileHandle {
@@ -713,6 +732,69 @@ impl Decoder for FileHandle {
 impl From<FileHandle> for Bytes {
     fn from(fhandle: FileHandle) -> Bytes {
         Bytes::from(fhandle.data)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsGetAttr {
+    pub fhandle: FileHandle,
+}
+
+impl Decoder for NfsGetAttr {
+    type Output = Self;
+
+    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+        let (input, fhandle) = FileHandle::decode(input)?;
+
+        Ok((input, NfsGetAttr {
+            fhandle,
+        }))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsFileAttributes {
+    _type: FileType,
+    mode: FileMode,
+    nlink: u32,
+    uid: u32,
+    gid: u32,
+    size: u32,
+    blocksize: u32,
+    rdev: u32,
+    blocks: u32,
+    fsid: u32,
+    file_id: u32,
+    atime: SystemTime,
+    mtime: SystemTime,
+    ctime: SystemTime,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsGetAttrReply {
+    pub status: NfsStatus,
+    pub attributes: NfsFileAttributes,
+}
+
+impl From<NfsGetAttrReply> for Bytes {
+    fn from(reply: NfsGetAttrReply) -> Bytes {
+        let mut buffer = BytesMut::new();
+
+        buffer.extend(Bytes::from(reply.status));
+        buffer.extend(Bytes::from(reply.attributes));
+
+        buffer.freeze()
+    }
+}
+
+impl From<Metadata> for NfsGetAttrReply {
+    fn from(input: Metadata) -> NfsGetAttrReply {
+        let mut attributes = NfsFileAttributes::from(input);
+
+        NfsGetAttrReply {
+            status: NfsStatus::Ok,
+            attributes: attributes,
+        }
     }
 }
 
@@ -1139,7 +1221,10 @@ mod test {
     #[test]
     fn it_can_encode_nfs_lookup_reply() {
         let reply = NfsLookupReply {
-            _type: FileType::File,
+            attributes: NfsFileAttributes {
+                _type: FileType::File,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
