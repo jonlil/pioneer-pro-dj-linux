@@ -200,9 +200,9 @@ impl From<RpcReply> for Bytes {
 
 #[derive(Debug, PartialEq)]
 pub struct NfsReadReply {
-    status: NfsStatus,
-    attributes: NfsFileAttributes,
-    data: NfsDataWrapper,
+    pub status: NfsStatus,
+    pub attributes: NfsFileAttributes,
+    pub data: NfsDataWrapper,
 }
 
 impl From<NfsReadReply> for Bytes {
@@ -219,15 +219,22 @@ impl From<NfsReadReply> for Bytes {
 
 #[derive(Debug, PartialEq)]
 pub struct NfsDataWrapper {
-    length: u32,
     data: Vec<u8>,
+}
+
+impl NfsDataWrapper {
+    pub fn new(data: Vec<u8>) -> NfsDataWrapper {
+        NfsDataWrapper {
+            data,
+        }
+    }
 }
 
 impl From<NfsDataWrapper> for Bytes {
     fn from(data: NfsDataWrapper) -> Self {
         let mut buffer = BytesMut::new();
 
-        buffer.put_u32(data.length);
+        buffer.put_u32(data.data.len() as u32);
         buffer.extend(&data.data);
 
         buffer.freeze()

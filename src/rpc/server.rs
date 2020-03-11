@@ -6,12 +6,10 @@ use tokio::net::UdpSocket;
 use tokio::stream::StreamExt;
 use futures::{SinkExt};
 
-use super::packets::{*, self as rpc_packages, NfsLookupReply, NfsFileAttributes, NfsStatus};
+use super::packets::*;
 use super::codec::RpcBytesCodec;
 use super::events::{EventHandler};
-use std::path::{PathBuf, Path};
-use std::os::unix::fs::MetadataExt;
-use std::fs::{File};
+use crate::rpc::nfs_program::RpcNfsProgramHandler;
 
 struct RpcProcedureRouter<T>
     where T: EventHandler,
@@ -81,146 +79,6 @@ async fn rpc_program_server<T: EventHandler>(
     }
 
     Ok(())
-}
-
-fn encode_file_handler(inode: &u64) -> [u8; 32] {
-    let mut data = [0u8; 32];
-    for (index, value) in inode.to_le_bytes().iter().enumerate() {
-        data[index] = *value;
-    }
-    data
-}
-
-#[derive(Debug)]
-struct FileWrapper {
-    inode: u64,
-    encoded: [u8; 32],
-    file: File,
-}
-
-fn get_fhandle<T: AsRef<Path>>(path: T, inode: u64) -> Result<FileWrapper, std::io::Error> {
-    let file = File::open(path)?;
-    let encoded_fhandle = encode_file_handler(&inode);
-    Ok(FileWrapper {
-        file,
-        encoded: encoded_fhandle,
-        inode,
-    })
-}
-
-struct RpcNfsProgramHandler {
-    path: PathBuf,
-    file_handlers: HashMap<u64, File>,
-}
-
-#[derive(Debug)]
-enum NfsProcedureError {
-    FileDoesNotExist,
-    StaleFileHandle,
-    NotImplemented,
-}
-
-impl From<std::io::Error> for NfsProcedureError {
-    fn from(_error: std::io::Error) -> NfsProcedureError {
-        NfsProcedureError::FileDoesNotExist
-    }
-}
-
-impl RpcNfsProgramHandler {
-    fn new() -> Self {
-        Self {
-            path: PathBuf::from("/"),
-            file_handlers: HashMap::new(),
-        }
-    }
-
-    fn reset_path(&mut self) {
-        self.path = PathBuf::from("/");
-    }
-
-    pub fn lookup(&mut self, lookup: &rpc_packages::NfsLookup) -> Result<NfsLookupReply, NfsProcedureError> {
-        let mut temp_path = self.path.clone();
-        temp_path.push(lookup.filename());
-
-        match std::fs::metadata(temp_path.as_path()) {
-            Ok(metadata) => {
-                self.path = temp_path;
-                let fwrapper = get_fhandle(self.path.as_path(), metadata.ino())?;
-
-                if metadata.is_file() {
-                    self.file_handlers.insert(fwrapper.inode, fwrapper.file);
-                    self.reset_path();
-                }
-
-                Ok(NfsLookupReply {
-                    attributes: NfsFileAttributes::from(metadata),
-                    fhandle: FileHandle::new(fwrapper.encoded),
-                    status: NfsStatus::Ok,
-                })
-            },
-            Err(err) => {
-                self.reset_path();
-                Err(err.into())
-            },
-        }
-    }
-
-    pub fn getattr(&mut self, arguments: &NfsGetAttr) -> Result<NfsGetAttrReply, NfsProcedureError> {
-        let inode = arguments.fhandle.ino();
-        match self.file_handlers.get(&inode) {
-            Some(file) => {
-                let metadata = file.metadata()?;
-                Ok(NfsGetAttrReply {
-                    status: NfsStatus::Ok,
-                    attributes: NfsFileAttributes::from(metadata),
-                })
-            },
-            None => Err(NfsProcedureError::StaleFileHandle),
-        }
-    }
-
-    fn call_procedure(&mut self, call: &RpcCall) -> Result<RpcReplyMessage, NfsProcedureError> {
-        match call.procedure() {
-            RpcProcedure::NfsLookup(lookup) => Ok(RpcReplyMessage::NfsLookup(self.lookup(lookup)?)),
-            RpcProcedure::NfsGetAttr(arguments) => Ok(RpcReplyMessage::NfsGetAttr(self.getattr(arguments)?)),
-            _ => Err(NfsProcedureError::NotImplemented),
-        }
-    }
-
-    async fn run(&mut self, mut socket: UdpFramed<RpcBytesCodec>) {
-        while let Some(package) = socket.next().await {
-            match package {
-                Ok((rpc_message, address)) => {
-                    match rpc_message.message() {
-                        RpcMessageType::Call(call) => {
-                            match self.call_procedure(call) {
-                                Ok(rpc_reply) => {
-                                    let package = (
-                                        RpcMessage::new(
-                                            rpc_message.transaction_id(),
-                                            RpcMessageType::Reply(RpcReply {
-                                                verifier: RpcAuth::Null,
-                                                reply_state: RpcReplyState::Accepted,
-                                                accept_state: RpcAcceptState::Success,
-                                                data: rpc_reply,
-                                            }),
-                                        ),
-                                        address,
-                                    );
-                                    socket.send(package).await;
-                                },
-                                Err(err) => {
-                                    eprintln!("{:?}", err);
-                                }
-                            };
-                        },
-                        _ => {},
-                    }
-                },
-                Err(_err) => {},
-            }
-        }
-    }
 }
 
 pub struct PortmapServer {
