@@ -7,6 +7,7 @@ use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use std::fs::Metadata;
+use std::os::unix::fs::MetadataExt;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -353,12 +354,12 @@ impl From<Metadata> for NfsFileAttributes {
                 group: 81,
                 other: 24,
             },
-            nlink: 0,
-            uid: 0,
-            gid: 0,
-            size: 0,
+            nlink: metadata.nlink() as u32,
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+            size: metadata.size() as u32,
             blocksize: 0,
-            rdev: 0,
+            rdev: metadata.rdev() as u32,
             blocks: 0,
             fsid: 0,
             file_id: 0,

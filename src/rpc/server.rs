@@ -8,10 +8,10 @@ use futures::{SinkExt};
 
 use super::packets::{*, self as rpc_packages, NfsLookupReply, NfsFileAttributes, NfsStatus};
 use super::codec::RpcBytesCodec;
-use super::events::{EventHandler, RpcResult};
+use super::events::{EventHandler};
 use std::path::{PathBuf, Path};
 use std::os::unix::fs::MetadataExt;
-use std::fs::{File, Metadata};
+use std::fs::{File};
 
 struct RpcProcedureRouter<T>
     where T: EventHandler,
@@ -315,6 +315,7 @@ mod test {
     use std::path::Path;
     use bytes::Bytes;
     use std::io::{Error, ErrorKind};
+    use super::super::events::RpcResult;
 
     struct Context;
     struct MockEventHandler;
