@@ -30,8 +30,7 @@ impl Decoder for DbBytesCodec {
     }
 }
 
-impl Encoder for DbBytesCodec {
-    type Item = DBMessage;
+impl Encoder<DBMessage> for DbBytesCodec {
     type Error = Error;
 
     fn encode(&mut self, data: DBMessage, buf: &mut BytesMut) -> Result<(), Error> {
