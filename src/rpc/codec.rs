@@ -39,8 +39,7 @@ fn calculate_fill_bytes(length: usize) -> Vec<u8> {
     }
 }
 
-impl Encoder for RpcBytesCodec {
-    type Item = RpcMessage;
+impl Encoder<RpcMessage> for RpcBytesCodec {
     type Error = Error;
 
     fn encode(&mut self, data: RpcMessage, buf: &mut BytesMut) -> Result<(), Error> {

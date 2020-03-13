@@ -121,7 +121,7 @@ impl RpcNfsProgramHandler {
                 Ok((rpc_message, address)) => {
                     match rpc_message.message() {
                         RpcMessageType::Call(call) => {
-                            match self.call_procedure(call) {
+                            match self.call_procedure(&call) {
                                 Ok(rpc_reply) => {
                                     let package = (
                                         RpcMessage::new(
