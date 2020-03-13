@@ -948,6 +948,7 @@ mod test {
     }
 
     #[test]
+    #[ignore]
     fn test_metadata_dialog() {
         let dialog = fixtures::metadata_dialog();
         let mut context = context();
