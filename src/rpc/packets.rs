@@ -199,12 +199,48 @@ impl From<RpcReply> for Bytes {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct NfsReadReply {
+    pub status: NfsStatus,
+    pub attributes: NfsFileAttributes,
+    pub data: NfsDataWrapper,
+}
+
+impl From<NfsReadReply> for Bytes {
+    fn from(data: NfsReadReply) -> Self {
+        let mut buffer = BytesMut::new();
+
+        buffer.extend(Bytes::from(data.status));
+        buffer.extend(Bytes::from(data.attributes));
+        buffer.extend(Bytes::from(data.data));
+
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsDataWrapper {
+    pub data: Vec<u8>,
+}
+
+impl From<NfsDataWrapper> for Bytes {
+    fn from(data: NfsDataWrapper) -> Self {
+        let mut buffer = BytesMut::new();
+
+        buffer.put_u32(data.data.len() as u32);
+        buffer.extend(&data.data);
+
+        buffer.freeze()
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum RpcReplyMessage {
     PortmapGetport(PortmapGetportReply),
     MountExport(MountExportReply),
     MountMnt(MountMntReply),
     NfsLookup(NfsLookupReply),
     NfsGetAttr(NfsGetAttrReply),
+    NfsRead(NfsReadReply),
 }
 
 impl From<RpcReplyMessage> for Bytes {
@@ -215,6 +251,7 @@ impl From<RpcReplyMessage> for Bytes {
             RpcReplyMessage::MountMnt(reply)       => Bytes::from(reply),
             RpcReplyMessage::NfsLookup(reply)      => Bytes::from(reply),
             RpcReplyMessage::NfsGetAttr(reply)     => Bytes::from(reply),
+            RpcReplyMessage::NfsRead(reply)        => Bytes::from(reply),
         }
     }
 }
@@ -358,9 +395,9 @@ impl From<Metadata> for NfsFileAttributes {
             uid: metadata.uid(),
             gid: metadata.gid(),
             size: metadata.size() as u32,
-            blocksize: 0,
+            blocksize: metadata.blksize() as u32,
             rdev: metadata.rdev() as u32,
-            blocks: 0,
+            blocks: metadata.blocks() as u32,
             fsid: 0,
             file_id: 0,
             atime: metadata.accessed().unwrap(),
@@ -635,6 +672,7 @@ pub enum RpcProcedure {
     NfsNull,
     NfsGetAttr(NfsGetAttr),
     NfsLookup(NfsLookup),
+    NfsRead(NfsRead),
     MountMnt(MountMnt),
     MountExport,
     MountNull,
@@ -661,6 +699,10 @@ impl RpcProcedure {
                 let (input, data) = NfsLookup::decode(&input)?;
                 Ok((input, RpcProcedure::NfsLookup(data)))
             },
+            (RpcProgram::Nfs, 6) => {
+                let (input, data) = NfsRead::decode(&input)?;
+                Ok((input, RpcProcedure::NfsRead(data)))
+            }
             (RpcProgram::Nfs, _)        => Err(nom::Err::Error((input, Switch))),
             (RpcProgram::Mount, 5u32)   => Ok((input, RpcProcedure::MountExport)),
             (RpcProgram::Mount, 1u32)   => {
@@ -733,6 +775,32 @@ impl Decoder for FileHandle {
 impl From<FileHandle> for Bytes {
     fn from(fhandle: FileHandle) -> Bytes {
         Bytes::from(fhandle.data)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NfsRead {
+    pub fhandle: FileHandle,
+    pub offset: u32,
+    pub count: u32,
+    pub total_count: u32,
+}
+
+impl Decoder for NfsRead {
+    type Output = Self;
+
+    fn decode(input: &[u8]) -> IResult<&[u8], Self::Output> {
+        let (input, fhandle) = FileHandle::decode(input)?;
+        let (input, offset) = be_u32(input)?;
+        let (input, count) = be_u32(input)?;
+        let (input, total_count) = be_u32(input)?;
+
+        Ok((input, NfsRead {
+            fhandle,
+            offset,
+            count,
+            total_count,
+        }))
     }
 }
 
