@@ -1,8 +1,9 @@
 use std::io;
 use std::io::prelude::*;
 use std::fs::File;
-use std::io::{SeekFrom, BufReader};
+use std::io::SeekFrom;
 use std::path::Path;
+use crate::rpc::packets::NfsDataWrapper;
 
 #[derive(Debug)]
 pub struct FileWrapper {
@@ -21,18 +22,15 @@ pub fn get_fhandle<T: AsRef<Path>>(path: T, inode: u64) -> Result<FileWrapper, s
     })
 }
 
-pub fn read_file_range(mut file: &File, start: u32, count: u32) -> Result<Vec<u8>, io::Error> {
-    let mut buf: Vec<u8> = Vec::with_capacity(count as usize); 
+pub fn read_file_range(mut file: &File, start: u32, count: u32) -> Result<NfsDataWrapper, io::Error> {
+    let mut buf: Vec<u8> = vec![0x00; count as usize];
 
-    match file.seek(SeekFrom::Start(start as u64)) {
-        Ok(_) => {},
-        Err(err) => return Err(err),
-    };
+    file.seek(SeekFrom::Start(start as u64))?;
+    file.take(count as u64).read(&mut buf)?;
 
-    let mut handle = file.take(count as u64);
-    handle.read_to_end(&mut buf)?;
-
-    Ok(buf)
+    Ok(NfsDataWrapper {
+        data: buf,
+    })
 }
 
 fn encode_file_handler(inode: &u64) -> [u8; 32] {

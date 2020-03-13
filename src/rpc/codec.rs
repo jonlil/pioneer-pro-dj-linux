@@ -30,6 +30,15 @@ impl Decoder for RpcBytesCodec {
     }
 }
 
+fn calculate_fill_bytes(length: usize) -> Vec<u8> {
+    let modulo = length % 4;
+    if modulo != 0 {
+        vec![0x00; (4 - modulo) as usize]
+    } else {
+        vec![]
+    }
+}
+
 impl Encoder for RpcBytesCodec {
     type Item = RpcMessage;
     type Error = Error;
@@ -37,8 +46,10 @@ impl Encoder for RpcBytesCodec {
     fn encode(&mut self, data: RpcMessage, buf: &mut BytesMut) -> Result<(), Error> {
         match Bytes::try_from(data) {
             Ok(data) => {
+                let fill_bytes = calculate_fill_bytes(data.len());
                 buf.reserve(data.len());
                 buf.put(data);
+                buf.extend(&fill_bytes);
                 Ok(())
             },
             Err(_err) => Err(Error::new(

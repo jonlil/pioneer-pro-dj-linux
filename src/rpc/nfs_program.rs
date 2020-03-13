@@ -93,13 +93,13 @@ impl RpcNfsProgramHandler {
         let inode = arguments.fhandle.ino();
         match self.file_handlers.get_mut(&inode) {
             Some(mut file) => {
-                let bytes = read_file_range(&mut file, arguments.offset, arguments.count)?;
+                let data = read_file_range(&mut file, arguments.offset, arguments.count)?;
                 let metadata = file.metadata()?;
 
                 Ok(NfsReadReply {
                     status: NfsStatus::Ok,
                     attributes: NfsFileAttributes::from(metadata),
-                    data: NfsDataWrapper::new(bytes),
+                    data,
                 })
             },
             None => Err(NfsProcedureError::StaleFileHandle),

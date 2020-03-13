@@ -219,15 +219,7 @@ impl From<NfsReadReply> for Bytes {
 
 #[derive(Debug, PartialEq)]
 pub struct NfsDataWrapper {
-    data: Vec<u8>,
-}
-
-impl NfsDataWrapper {
-    pub fn new(data: Vec<u8>) -> NfsDataWrapper {
-        NfsDataWrapper {
-            data,
-        }
-    }
+    pub data: Vec<u8>,
 }
 
 impl From<NfsDataWrapper> for Bytes {
@@ -403,9 +395,9 @@ impl From<Metadata> for NfsFileAttributes {
             uid: metadata.uid(),
             gid: metadata.gid(),
             size: metadata.size() as u32,
-            blocksize: 0,
+            blocksize: metadata.blksize() as u32,
             rdev: metadata.rdev() as u32,
-            blocks: 0,
+            blocks: metadata.blocks() as u32,
             fsid: 0,
             file_id: 0,
             atime: metadata.accessed().unwrap(),
