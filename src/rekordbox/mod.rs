@@ -26,6 +26,7 @@ mod rpc;
 mod db_codec;
 mod status_event_server;
 mod keepalive;
+mod database;
 
 // tests
 #[cfg(test)]
@@ -37,8 +38,9 @@ pub trait EventHandler<T> {
 
 use status_event_server::StatusEventServer;
 pub use server::{Server, ServerState};
-pub use server::Database as Database;
+pub use database::Database;
 pub use server::ApplicationEvent as Event;
 use rpc::server as rpc_server;
 use library::DBLibraryServer;
 pub use packets::DBMessage;
+pub use library::{Track, Metadata};

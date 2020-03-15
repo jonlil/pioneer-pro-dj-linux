@@ -11,6 +11,7 @@ use crate::utils::network::{PioneerNetwork, find_interface};
 use crate::rekordbox::StatusEventServer;
 use crate::rekordbox::DBLibraryServer;
 use crate::rekordbox::rpc_server;
+use crate::rekordbox::Database;
 use super::keepalive::{
     Event as KeepAliveEvent,
     KeepAliveContentType,
@@ -29,13 +30,6 @@ use super::{EventHandler};
 pub enum ApplicationEvent {
     InitiateLink,
     DeviceChange,
-}
-
-pub struct Database;
-impl Database {
-    pub fn new() -> Self {
-        Self
-    }
 }
 
 #[derive(Debug)]

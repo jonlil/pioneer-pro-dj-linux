@@ -1,6 +1,7 @@
 use bytes::{Bytes, BytesMut};
 use std::net::{SocketAddr};
 use std::sync::{Arc, Mutex};
+use std::path::{PathBuf, Path};
 use tokio::net::TcpListener;
 use tokio::stream::StreamExt;
 use tokio_util::codec::{Framed, BytesCodec};
@@ -39,6 +40,29 @@ trait Controller {
 
 struct RequestWrapper {
     message: DBMessage,
+}
+
+#[derive(Debug)]
+pub struct Metadata {
+    pub artist: String,
+    pub title: String,
+    pub bpm: u16,
+    pub album: String,
+}
+
+#[derive(Debug)]
+pub struct Track {
+    metadata: Metadata,
+    path: PathBuf,
+}
+
+impl Track {
+    pub fn new(metadata: Metadata, path: PathBuf) -> Self {
+        Self {
+            metadata,
+            path,
+        }
+    }
 }
 
 impl RequestWrapper {

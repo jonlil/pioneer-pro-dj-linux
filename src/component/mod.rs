@@ -1,6 +1,7 @@
 use std::thread;
-use super::rekordbox::{Server, Database, Event};
 use std::sync::mpsc::{channel, Receiver};
+use crate::rekordbox::{Server, Database, Event};
+use std::path::Path;
 
 pub struct App {
     rekordbox_server: Server,
@@ -8,9 +9,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub fn new<T: AsRef<Path>>(path: T) -> Self {
         let (tx, rx) = channel::<Event>();
-        let rekordbox_server = Server::new(Database::new(), tx);
+        let rekordbox_server = Server::new(
+            Database::new(path),
+            tx,
+        );
 
         App {
             rekordbox_server,
