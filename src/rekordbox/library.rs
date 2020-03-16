@@ -12,19 +12,21 @@ use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
 use super::metadata_type;
-use crate::rekordbox::ServerState;
+use crate::rekordbox::{Database, ServerState};
 use crate::utils::network::random_ipv4_socket_address;
 
 struct ClientState {
     previous_request: Option<DBRequestType>,
     state: Arc<Mutex<ServerState>>,
+    database: Arc<Database>,
 }
 
 impl ClientState {
-    pub fn new(state: Arc<Mutex<ServerState>>) -> Self {
+    pub fn new(state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Self {
         Self {
             previous_request: None,
-            state: state,
+            state,
+            database,
         }
     }
 }
@@ -52,8 +54,8 @@ pub struct Metadata {
 
 #[derive(Debug)]
 pub struct Track {
-    metadata: Metadata,
-    path: PathBuf,
+    pub metadata: Metadata,
+    pub path: PathBuf,
 }
 
 impl Track {
@@ -773,13 +775,6 @@ fn process(
 
     match DBMessage::parse(&bytes) {
         Ok((_unprocessed_bytes, message)) => {
-            eprintln!("{:?}, {:?}", message.request_type, context.previous_request);
-            //eprintln!("previous_request: {:?}\nrequest_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
-            //    context.previous_request,
-            //    message.request_type,
-            //    message.arguments,
-            //    peer_addr);
-
             if let Some(request_handler) = get_controller(&message.request_type) {
                 let request_type = &message.request_type.clone();
                 let bytes = RequestHandler::new(
@@ -795,22 +790,22 @@ fn process(
                 eprintln!("Not covered: {:?}", bytes);
             }
         },
-        Err(nom::Err::Error((bytes, _))) => {
-            eprintln!("Error: {:?}", bytes);
-        },
-        _ => {
-            eprintln!("Not covered: {:?}", bytes);
-        },
+        Err(nom::Err::Error((bytes, _))) => eprintln!("Error: {:?}", bytes),
+        _ => eprintln!("Not covered: {:?}", bytes),
     }
 
     Bytes::from("Failed processing request into response")
 }
 
-async fn spawn_library_client_handler(mut listener: TcpListener, state: &Arc<Mutex<ServerState>>) {
+async fn spawn_library_client_handler(
+    mut listener: TcpListener,
+    state: &Arc<Mutex<ServerState>>,
+    database: &Arc<Database>
+) {
     match listener.accept().await {
         Ok((remote_client, address)) => {
             let mut remote_client = Framed::new(remote_client, BytesCodec::new());
-            let mut context = ClientState::new(state.clone());
+            let mut context = ClientState::new(state.clone(), database.clone());
 
             while let Some(result) = remote_client.next().await {
                 match result {
@@ -830,7 +825,7 @@ async fn spawn_library_client_handler(mut listener: TcpListener, state: &Arc<Mut
 
 pub struct DBLibraryServer;
 impl DBLibraryServer {
-    async fn spawn(address: &str, state: Arc<Mutex<ServerState>>) -> Result<(), std::io::Error> {
+    async fn spawn(address: &str, state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Result<(), std::io::Error> {
         let addr = address.parse::<SocketAddr>().unwrap();
         let mut listener = TcpListener::bind(&addr).await?;
 
@@ -838,6 +833,7 @@ impl DBLibraryServer {
             match listener.accept().await {
                 Ok((socket, _address)) => {
                     let state = state.clone();
+                    let database = database.clone();
 
                     tokio::spawn(async move {
                         let mut socket = Framed::new(socket, BytesCodec::new());
@@ -846,11 +842,12 @@ impl DBLibraryServer {
                             match result {
                                 Ok(_data) => {
                                     let state = state.clone();
+                                    let database = database.clone();
                                     let allocated_socket = TcpListener::bind(&random_ipv4_socket_address()).await.unwrap();
                                     let allocated_port = allocated_socket.local_addr().unwrap().port();
 
                                     tokio::spawn(async move {
-                                        spawn_library_client_handler(allocated_socket, &state).await;
+                                        spawn_library_client_handler(allocated_socket, &state, &database).await;
                                     });
                                     let message = Bytes::from(allocated_port.to_be_bytes().to_vec());
                                     match socket.send(message).await {
@@ -868,8 +865,8 @@ impl DBLibraryServer {
         }
     }
 
-    pub async fn run(state: Arc<Mutex<ServerState>>) -> Result<(), std::io::Error> {
-        Self::spawn("0.0.0.0:12523", state.clone()).await
+    pub async fn run(state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Result<(), std::io::Error> {
+        Self::spawn("0.0.0.0:12523", state.clone(), database).await
     }
 }
 
@@ -879,10 +876,13 @@ mod test {
     use super::*;
     use super::super::fixtures;
     use pretty_assertions::{assert_eq};
-    use crate::rekordbox::ServerState;
+    use crate::rekordbox::{ServerState, Database};
 
     fn context() -> ClientState {
-        ClientState::new(Arc::new(Mutex::new(ServerState::new())))
+        ClientState::new(
+            Arc::new(Mutex::new(ServerState::new())),
+            Arc::new(Database::new("./test/music")),
+        )
     }
 
     pub struct TestController;

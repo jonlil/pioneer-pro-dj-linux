@@ -80,7 +80,7 @@ impl Server {
         keepalive_server(&self.tx, &self.state);
         let rpc_future = rpc_server(self.state.clone())
             .map_err(|_| "Unable to start RPC Server".to_string());
-        let db_library_future = DBLibraryServer::run(self.state.clone())
+        let db_library_future = DBLibraryServer::run(self.state.clone(), self.database.clone())
             .map_err(|_| "Unable to start DBLibraryServer".to_string());
         match status_event_server(&self.tx, &self.state) {
             Err(err) => {
