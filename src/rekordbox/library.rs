@@ -390,17 +390,20 @@ impl RenderController {
         response
     }
 
-    fn render_artist_page(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
+    fn render_artist_page(&self, request: RequestWrapper, context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
 
-        response.push(build_message_item(&transaction_id,
-            "Loopmasters",
-            metadata_type::ARTIST,
-            0x01,
-        ));
+        for (index, artist) in context.database.artists().into_iter().enumerate() {
+            let artist_id = index + 1;
+            response.push(build_message_item(&transaction_id,
+                artist.as_str(),
+                metadata_type::ARTIST,
+                artist_id as u32,
+            ));
+        }
 
         response.push(DBMessage::new(
             transaction_id,
@@ -452,26 +455,24 @@ impl RenderController {
         response
     }
 
-    fn render_title_by_artist_album(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
+    fn render_title_by_artist_album(&self, request: RequestWrapper, context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
+        let artist_id = dbfield_to_u32(&request.message.arguments[2]);
+
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
 
-        let mut items: Vec<(&str, u8)> = vec![("Demo Track 1", 0x05)];
-
-        // This seems to be related to only query one MenuItem
-        if request.message.arguments[2 as usize].value > Bytes::from(vec![0x00, 0x00, 0x00, 0x01]) {
-            items.extend(vec![("Demo Track 2", 0x06)]);
-        }
-
-        response.extend(items.iter().map(|item| {
-            build_message_item(&transaction_id,
-                item.0,
+        let title_iterator = context.database.title_by_artist(artist_id).into_iter();
+        for (index, track) in title_iterator.enumerate() {
+            let track_id = index + 1;
+            response.push(build_message_item(
+                &transaction_id,
+                track.as_str(),
                 metadata_type::TITLE,
-                item.1 as u32,
-            )
-        }).collect());
+                track_id as u32,
+            ));
+        }
 
         response.push(DBMessage::new(
             transaction_id,
@@ -680,17 +681,32 @@ impl Controller for QueryMountInfoController {
     }
 }
 
+fn dbfield_to_u32(input: &DBField) -> u32 {
+    if input.kind != DBFieldType::U32 {
+        panic!("Unsupported conversation");
+    }
+
+    let mut inner_value: [u8; 4] = [0u8; 4];
+    let mut index = 0;
+    for val in input.value[..=3].iter() {
+        inner_value[index] = *val;
+        index += 1;
+    }
+    u32::from_be_bytes(inner_value)
+}
+
 struct TitleByArtistAlbumController;
 impl Controller for TitleByArtistAlbumController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
         let request_type_value = request.message.request_type.value();
+        let number_of_tracks_by_artist = 5u32;
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
             DBRequestType::Success,
             ArgumentCollection::new(vec![
                 DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
-                DBField::from(2u32),
+                DBField::from(number_of_tracks_by_artist),
             ])
         ))
     }
