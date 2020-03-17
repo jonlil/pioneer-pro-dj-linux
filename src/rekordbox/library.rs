@@ -15,6 +15,8 @@ use super::metadata_type;
 use crate::rekordbox::{Database, ServerState};
 use crate::utils::network::random_ipv4_socket_address;
 
+mod codec;
+
 struct ClientState {
     previous_request: Option<DBRequestType>,
     state: Arc<Mutex<ServerState>>,
