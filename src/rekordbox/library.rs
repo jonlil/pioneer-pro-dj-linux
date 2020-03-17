@@ -11,14 +11,18 @@ use super::packets::{DBMessage, ManyDBMessages, Arguments};
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
-use super::metadata_type;
 use crate::rekordbox::{Database, ServerState};
 use crate::utils::network::random_ipv4_socket_address;
 
 mod codec;
+mod request;
 pub mod database;
+pub mod metadata_type;
 
-struct ClientState {
+pub use metadata_type::*;
+use request::{Controller, RequestWrapper, RequestHandler};
+
+pub struct ClientState {
     previous_request: Option<DBRequestType>,
     state: Arc<Mutex<ServerState>>,
     database: Arc<Database>,
@@ -39,13 +43,6 @@ pub enum Event {
     Unsupported,
 }
 
-trait Controller {
-    fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes;
-}
-
-struct RequestWrapper {
-    message: DBMessage,
-}
 
 #[derive(Debug)]
 pub struct Metadata {
@@ -67,40 +64,6 @@ impl Track {
             metadata,
             path,
         }
-    }
-}
-
-impl RequestWrapper {
-    pub fn new(message: DBMessage) -> RequestWrapper {
-        RequestWrapper { message: message }
-    }
-
-    fn to_response(self) -> BytesMut {
-        self.message.to_response()
-    }
-}
-
-struct RequestHandler<'a> {
-    request: RequestWrapper,
-    controller: Box<dyn Controller>,
-    context: &'a mut ClientState,
-}
-
-impl <'a>RequestHandler<'a> {
-    pub fn new(
-        request_handler: Box<dyn Controller>,
-        message: DBMessage,
-        context: &'a mut ClientState
-    ) -> RequestHandler<'a> {
-        RequestHandler {
-            request: RequestWrapper::new(message),
-            controller: request_handler,
-            context: context,
-        }
-    }
-
-    fn respond_to(self) -> Bytes {
-        self.controller.to_response(self.request, self.context)
     }
 }
 
@@ -885,7 +848,7 @@ impl DBLibraryServer {
     }
 
     pub async fn run(state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Result<(), std::io::Error> {
-        Self::spawn("0.0.0.0:12523", state.clone(), database).await
+        Self::spawn("0.0.0.0:12523", state, database).await
     }
 }
 
@@ -902,6 +865,10 @@ mod test {
             Arc::new(Mutex::new(ServerState::new())),
             Arc::new(Database::new("./test/music")),
         )
+    }
+
+    fn peer() -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234)
     }
 
     pub struct TestController;
@@ -939,7 +906,7 @@ mod test {
     fn test_root_menu_dialog() {
         let dialog = fixtures::root_menu_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::RootMenuRequest), context.previous_request);
@@ -949,7 +916,7 @@ mod test {
     #[test]
     fn test_artist_dialog_response() {
         let dialog = fixtures::artist_dialog();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
         let mut context = context();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -961,7 +928,7 @@ mod test {
     fn test_album_by_artist_dialog() {
         let dialog = fixtures::album_by_artist_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::AlbumByArtistRequest), context.previous_request);
@@ -972,7 +939,7 @@ mod test {
     fn test_title_by_artist_dialog() {
         let dialog = fixtures::title_by_artist_album_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
@@ -983,7 +950,7 @@ mod test {
     fn test_title_by_artist_dialog_single_track() {
         let dialog = fixtures::title_by_artist_album_single_track_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
@@ -995,7 +962,7 @@ mod test {
     fn test_metadata_dialog() {
         let dialog = fixtures::metadata_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MetadataRequest), context.previous_request);
@@ -1007,7 +974,7 @@ mod test {
     fn test_mount_info_dialog() {
         let dialog = fixtures::mount_info_request_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MountInfoRequest), context.previous_request);
@@ -1018,7 +985,7 @@ mod test {
     fn test_preview_waveform_request() {
         let dialog = fixtures::preview_waveform_request();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
     }
@@ -1027,7 +994,7 @@ mod test {
     fn test_load_track_request() {
         let dialog = fixtures::load_track_request();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::LoadTrackRequest), context.previous_request);

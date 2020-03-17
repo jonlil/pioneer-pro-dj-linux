@@ -8,7 +8,7 @@ use std::net::Ipv4Addr;
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
-use super::metadata_type::{MetadataType, ROOT_ARTIST};
+use crate::rekordbox::library::{MetadataType, ROOT_ARTIST};
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
