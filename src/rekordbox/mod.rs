@@ -15,7 +15,6 @@ pub mod player;
 pub mod util;
 
 // Internal mods
-mod message;
 mod library;
 mod packets;
 mod db_field;
