@@ -316,37 +316,6 @@ pub struct StatusPacket {
     content: StatusContentType,
 }
 
-// TODO: Remove debug struct
-#[derive(Debug, PartialEq)]
-pub struct StatusPacket2 {
-    kind: StatusPacketType,
-    model: ModelName,
-}
-
-impl StatusPacket2 {
-    fn decode(input: &[u8]) -> IResult<&[u8], StatusPacket2> {
-        let (input, _) = UdpMagic::decode(input)?;
-        let (input, kind) = StatusPacketType::decode(input)?;
-        let (input, model)  = ModelName::decode(input)?;
-
-        Ok((input, StatusPacket2 {
-            kind,
-            model,
-        }))
-    }
-}
-
-impl TryFrom<Bytes> for StatusPacket2 {
-    type Error = &'static str;
-
-    fn try_from(message: Bytes) -> Result<Self, Self::Error> {
-        match StatusPacket2::decode(&message) {
-            Ok((_input, message)) => Ok(message),
-            Err(_err) => Err("Failed decoding StatusPacket2."),
-        }
-    }
-}
-
 impl StatusPacket {
     pub fn new(
         kind: StatusPacketType,
