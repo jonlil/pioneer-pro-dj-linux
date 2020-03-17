@@ -8,7 +8,7 @@ use std::net::Ipv4Addr;
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
-use super::metadata_type::{MetadataType, ROOT_ARTIST};
+use crate::rekordbox::library::{MetadataType, ROOT_ARTIST};
 
 type DBMessageResult<'a> = IResult<&'a [u8], &'a [u8]>;
 type DBMessageU32<'a> = IResult<&'a [u8], u32>;
@@ -314,37 +314,6 @@ pub struct StatusPacket {
     pub unknown1: u8,
     pub player_number: u8,
     content: StatusContentType,
-}
-
-// TODO: Remove debug struct
-#[derive(Debug, PartialEq)]
-pub struct StatusPacket2 {
-    kind: StatusPacketType,
-    model: ModelName,
-}
-
-impl StatusPacket2 {
-    fn decode(input: &[u8]) -> IResult<&[u8], StatusPacket2> {
-        let (input, _) = UdpMagic::decode(input)?;
-        let (input, kind) = StatusPacketType::decode(input)?;
-        let (input, model)  = ModelName::decode(input)?;
-
-        Ok((input, StatusPacket2 {
-            kind,
-            model,
-        }))
-    }
-}
-
-impl TryFrom<Bytes> for StatusPacket2 {
-    type Error = &'static str;
-
-    fn try_from(message: Bytes) -> Result<Self, Self::Error> {
-        match StatusPacket2::decode(&message) {
-            Ok((_input, message)) => Ok(message),
-            Err(_err) => Err("Failed decoding StatusPacket2."),
-        }
-    }
 }
 
 impl StatusPacket {

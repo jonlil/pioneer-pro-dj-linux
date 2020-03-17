@@ -1,6 +1,7 @@
 use bytes::{Bytes, BytesMut};
 use std::net::{SocketAddr};
 use std::sync::{Arc, Mutex};
+use std::path::{PathBuf, Path};
 use tokio::net::TcpListener;
 use tokio::stream::StreamExt;
 use tokio_util::codec::{Framed, BytesCodec};
@@ -10,20 +11,29 @@ use super::packets::{DBMessage, ManyDBMessages, Arguments};
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
-use super::metadata_type;
-use crate::rekordbox::ServerState;
+use crate::rekordbox::{Database, ServerState};
 use crate::utils::network::random_ipv4_socket_address;
 
-struct ClientState {
+mod codec;
+mod request;
+pub mod database;
+pub mod metadata_type;
+
+pub use metadata_type::*;
+use request::{Controller, RequestWrapper, RequestHandler};
+
+pub struct ClientState {
     previous_request: Option<DBRequestType>,
     state: Arc<Mutex<ServerState>>,
+    database: Arc<Database>,
 }
 
 impl ClientState {
-    pub fn new(state: Arc<Mutex<ServerState>>) -> Self {
+    pub fn new(state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Self {
         Self {
             previous_request: None,
-            state: state,
+            state,
+            database,
         }
     }
 }
@@ -33,45 +43,27 @@ pub enum Event {
     Unsupported,
 }
 
-trait Controller {
-    fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes;
+
+#[derive(Debug)]
+pub struct Metadata {
+    pub artist: String,
+    pub title: String,
+    pub bpm: u16,
+    pub album: String,
 }
 
-struct RequestWrapper {
-    message: DBMessage,
+#[derive(Debug)]
+pub struct Track {
+    pub metadata: Metadata,
+    pub path: PathBuf,
 }
 
-impl RequestWrapper {
-    pub fn new(message: DBMessage) -> RequestWrapper {
-        RequestWrapper { message: message }
-    }
-
-    fn to_response(self) -> BytesMut {
-        self.message.to_response()
-    }
-}
-
-struct RequestHandler<'a> {
-    request: RequestWrapper,
-    controller: Box<dyn Controller>,
-    context: &'a mut ClientState,
-}
-
-impl <'a>RequestHandler<'a> {
-    pub fn new(
-        request_handler: Box<dyn Controller>,
-        message: DBMessage,
-        context: &'a mut ClientState
-    ) -> RequestHandler<'a> {
-        RequestHandler {
-            request: RequestWrapper::new(message),
-            controller: request_handler,
-            context: context,
+impl Track {
+    pub fn new(metadata: Metadata, path: PathBuf) -> Self {
+        Self {
+            metadata,
+            path,
         }
-    }
-
-    fn respond_to(self) -> Bytes {
-        self.controller.to_response(self.request, self.context)
     }
 }
 
@@ -364,17 +356,20 @@ impl RenderController {
         response
     }
 
-    fn render_artist_page(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
+    fn render_artist_page(&self, request: RequestWrapper, context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
 
-        response.push(build_message_item(&transaction_id,
-            "Loopmasters",
-            metadata_type::ARTIST,
-            0x01,
-        ));
+        for (index, artist) in context.database.artists().into_iter().enumerate() {
+            let artist_id = index + 1;
+            response.push(build_message_item(&transaction_id,
+                artist.as_str(),
+                metadata_type::ARTIST,
+                artist_id as u32,
+            ));
+        }
 
         response.push(DBMessage::new(
             transaction_id,
@@ -426,26 +421,24 @@ impl RenderController {
         response
     }
 
-    fn render_title_by_artist_album(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
+    fn render_title_by_artist_album(&self, request: RequestWrapper, context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
+        let artist_id = dbfield_to_u32(&request.message.arguments[2]);
+
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
 
-        let mut items: Vec<(&str, u8)> = vec![("Demo Track 1", 0x05)];
-
-        // This seems to be related to only query one MenuItem
-        if request.message.arguments[2 as usize].value > Bytes::from(vec![0x00, 0x00, 0x00, 0x01]) {
-            items.extend(vec![("Demo Track 2", 0x06)]);
-        }
-
-        response.extend(items.iter().map(|item| {
-            build_message_item(&transaction_id,
-                item.0,
+        let title_iterator = context.database.title_by_artist(artist_id).into_iter();
+        for (index, track) in title_iterator.enumerate() {
+            let track_id = index + 1;
+            response.push(build_message_item(
+                &transaction_id,
+                track.as_str(),
                 metadata_type::TITLE,
-                item.1 as u32,
-            )
-        }).collect());
+                track_id as u32,
+            ));
+        }
 
         response.push(DBMessage::new(
             transaction_id,
@@ -654,17 +647,32 @@ impl Controller for QueryMountInfoController {
     }
 }
 
+fn dbfield_to_u32(input: &DBField) -> u32 {
+    if input.kind != DBFieldType::U32 {
+        panic!("Unsupported conversation");
+    }
+
+    let mut inner_value: [u8; 4] = [0u8; 4];
+    let mut index = 0;
+    for val in input.value[..=3].iter() {
+        inner_value[index] = *val;
+        index += 1;
+    }
+    u32::from_be_bytes(inner_value)
+}
+
 struct TitleByArtistAlbumController;
 impl Controller for TitleByArtistAlbumController {
     fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
         let request_type_value = request.message.request_type.value();
+        let number_of_tracks_by_artist = 5u32;
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
             DBRequestType::Success,
             ArgumentCollection::new(vec![
                 DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
-                DBField::from(2u32),
+                DBField::from(number_of_tracks_by_artist),
             ])
         ))
     }
@@ -749,13 +757,6 @@ fn process(
 
     match DBMessage::parse(&bytes) {
         Ok((_unprocessed_bytes, message)) => {
-            eprintln!("{:?}, {:?}", message.request_type, context.previous_request);
-            //eprintln!("previous_request: {:?}\nrequest_type => {:?}\narguments => {:#?}\npeer: {:?}\n",
-            //    context.previous_request,
-            //    message.request_type,
-            //    message.arguments,
-            //    peer_addr);
-
             if let Some(request_handler) = get_controller(&message.request_type) {
                 let request_type = &message.request_type.clone();
                 let bytes = RequestHandler::new(
@@ -771,27 +772,27 @@ fn process(
                 eprintln!("Not covered: {:?}", bytes);
             }
         },
-        Err(nom::Err::Error((bytes, _))) => {
-            eprintln!("Error: {:?}", bytes);
-        },
-        _ => {
-            eprintln!("Not covered: {:?}", bytes);
-        },
+        Err(nom::Err::Error((bytes, _))) => eprintln!("Error: {:?}", bytes),
+        _ => eprintln!("Not covered: {:?}", bytes),
     }
 
     Bytes::from("Failed processing request into response")
 }
 
-async fn spawn_library_client_handler(mut listener: TcpListener, state: &Arc<Mutex<ServerState>>) {
+async fn spawn_library_client_handler(
+    mut listener: TcpListener,
+    state: &Arc<Mutex<ServerState>>,
+    database: &Arc<Database>
+) {
     match listener.accept().await {
         Ok((remote_client, address)) => {
             let mut remote_client = Framed::new(remote_client, BytesCodec::new());
-            let mut context = ClientState::new(state.clone());
+            let mut context = ClientState::new(state.clone(), database.clone());
 
             while let Some(result) = remote_client.next().await {
                 match result {
                     Ok(data) => {
-                        match remote_client.send(process(Bytes::from(data), &mut context, &address)).await {
+                        match remote_client.send(process(data.freeze(), &mut context, &address)).await {
                             Ok(_) => {},
                             Err(err) => eprintln!("failed sending library query response; error = {}", err),
                         }
@@ -806,7 +807,7 @@ async fn spawn_library_client_handler(mut listener: TcpListener, state: &Arc<Mut
 
 pub struct DBLibraryServer;
 impl DBLibraryServer {
-    async fn spawn(address: &str, state: Arc<Mutex<ServerState>>) -> Result<(), std::io::Error> {
+    async fn spawn(address: &str, state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Result<(), std::io::Error> {
         let addr = address.parse::<SocketAddr>().unwrap();
         let mut listener = TcpListener::bind(&addr).await?;
 
@@ -814,6 +815,7 @@ impl DBLibraryServer {
             match listener.accept().await {
                 Ok((socket, _address)) => {
                     let state = state.clone();
+                    let database = database.clone();
 
                     tokio::spawn(async move {
                         let mut socket = Framed::new(socket, BytesCodec::new());
@@ -822,11 +824,12 @@ impl DBLibraryServer {
                             match result {
                                 Ok(_data) => {
                                     let state = state.clone();
+                                    let database = database.clone();
                                     let allocated_socket = TcpListener::bind(&random_ipv4_socket_address()).await.unwrap();
                                     let allocated_port = allocated_socket.local_addr().unwrap().port();
 
                                     tokio::spawn(async move {
-                                        spawn_library_client_handler(allocated_socket, &state).await;
+                                        spawn_library_client_handler(allocated_socket, &state, &database).await;
                                     });
                                     let message = Bytes::from(allocated_port.to_be_bytes().to_vec());
                                     match socket.send(message).await {
@@ -844,8 +847,8 @@ impl DBLibraryServer {
         }
     }
 
-    pub async fn run(state: Arc<Mutex<ServerState>>) -> Result<(), std::io::Error> {
-        Self::spawn("0.0.0.0:12523", state.clone()).await
+    pub async fn run(state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Result<(), std::io::Error> {
+        Self::spawn("0.0.0.0:12523", state, database).await
     }
 }
 
@@ -855,10 +858,17 @@ mod test {
     use super::*;
     use super::super::fixtures;
     use pretty_assertions::{assert_eq};
-    use crate::rekordbox::ServerState;
+    use crate::rekordbox::{ServerState, Database};
 
     fn context() -> ClientState {
-        ClientState::new(Arc::new(Mutex::new(ServerState::new())))
+        ClientState::new(
+            Arc::new(Mutex::new(ServerState::new())),
+            Arc::new(Database::new("./test/music")),
+        )
+    }
+
+    fn peer() -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234)
     }
 
     pub struct TestController;
@@ -896,7 +906,7 @@ mod test {
     fn test_root_menu_dialog() {
         let dialog = fixtures::root_menu_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::RootMenuRequest), context.previous_request);
@@ -906,7 +916,7 @@ mod test {
     #[test]
     fn test_artist_dialog_response() {
         let dialog = fixtures::artist_dialog();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
         let mut context = context();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
@@ -918,7 +928,7 @@ mod test {
     fn test_album_by_artist_dialog() {
         let dialog = fixtures::album_by_artist_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::AlbumByArtistRequest), context.previous_request);
@@ -929,7 +939,7 @@ mod test {
     fn test_title_by_artist_dialog() {
         let dialog = fixtures::title_by_artist_album_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
@@ -940,7 +950,7 @@ mod test {
     fn test_title_by_artist_dialog_single_track() {
         let dialog = fixtures::title_by_artist_album_single_track_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
@@ -952,7 +962,7 @@ mod test {
     fn test_metadata_dialog() {
         let dialog = fixtures::metadata_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MetadataRequest), context.previous_request);
@@ -964,7 +974,7 @@ mod test {
     fn test_mount_info_dialog() {
         let dialog = fixtures::mount_info_request_dialog();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::MountInfoRequest), context.previous_request);
@@ -975,7 +985,7 @@ mod test {
     fn test_preview_waveform_request() {
         let dialog = fixtures::preview_waveform_request();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
     }
@@ -984,7 +994,7 @@ mod test {
     fn test_load_track_request() {
         let dialog = fixtures::load_track_request();
         let mut context = context();
-        let peer_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 1234);
+        let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
         assert_eq!(Some(DBRequestType::LoadTrackRequest), context.previous_request);

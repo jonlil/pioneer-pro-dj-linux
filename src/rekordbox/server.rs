@@ -11,6 +11,7 @@ use crate::utils::network::{PioneerNetwork, find_interface};
 use crate::rekordbox::StatusEventServer;
 use crate::rekordbox::DBLibraryServer;
 use crate::rekordbox::rpc_server;
+use crate::rekordbox::Database;
 use super::keepalive::{
     Event as KeepAliveEvent,
     KeepAliveContentType,
@@ -29,13 +30,6 @@ use super::{EventHandler};
 pub enum ApplicationEvent {
     InitiateLink,
     DeviceChange,
-}
-
-pub struct Database;
-impl Database {
-    pub fn new() -> Self {
-        Self
-    }
 }
 
 #[derive(Debug)]
@@ -86,7 +80,7 @@ impl Server {
         keepalive_server(&self.tx, &self.state);
         let rpc_future = rpc_server(self.state.clone())
             .map_err(|_| "Unable to start RPC Server".to_string());
-        let db_library_future = DBLibraryServer::run(self.state.clone())
+        let db_library_future = DBLibraryServer::run(self.state.clone(), self.database.clone())
             .map_err(|_| "Unable to start DBLibraryServer".to_string());
         match status_event_server(&self.tx, &self.state) {
             Err(err) => {

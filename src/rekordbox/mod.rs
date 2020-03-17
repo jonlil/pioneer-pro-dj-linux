@@ -15,15 +15,12 @@ pub mod player;
 pub mod util;
 
 // Internal mods
-mod message;
 mod library;
 mod packets;
 mod db_field;
 mod db_request_type;
 mod db_message_argument;
-mod metadata_type;
 mod rpc;
-mod db_codec;
 mod status_event_server;
 mod keepalive;
 
@@ -37,8 +34,10 @@ pub trait EventHandler<T> {
 
 use status_event_server::StatusEventServer;
 pub use server::{Server, ServerState};
-pub use server::Database as Database;
 pub use server::ApplicationEvent as Event;
 use rpc::server as rpc_server;
 use library::DBLibraryServer;
 pub use packets::DBMessage;
+pub use library::{Track, Metadata};
+pub use library::database::Database;
+use library::metadata_type;

@@ -1,6 +1,6 @@
 use bytes::{Bytes, BytesMut};
 use tokio_util::codec::{Encoder, Decoder};
-use super::packets::{DBMessage};
+use crate::rekordbox::packets::{DBMessage};
 use std::io::{Error, ErrorKind};
 use std::convert::TryFrom;
 
