@@ -792,7 +792,7 @@ async fn spawn_library_client_handler(
             while let Some(result) = remote_client.next().await {
                 match result {
                     Ok(data) => {
-                        match remote_client.send(process(Bytes::from(data), &mut context, &address)).await {
+                        match remote_client.send(process(data.freeze(), &mut context, &address)).await {
                             Ok(_) => {},
                             Err(err) => eprintln!("failed sending library query response; error = {}", err),
                         }
