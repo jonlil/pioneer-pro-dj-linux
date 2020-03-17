@@ -16,6 +16,7 @@ use crate::rekordbox::{Database, ServerState};
 use crate::utils::network::random_ipv4_socket_address;
 
 mod codec;
+pub mod database;
 
 struct ClientState {
     previous_request: Option<DBRequestType>,
