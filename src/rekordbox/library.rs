@@ -1,7 +1,6 @@
 use bytes::{Bytes, BytesMut};
 use std::net::{SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::path::{PathBuf, Path};
 use tokio::net::TcpListener;
 use tokio::stream::StreamExt;
 use tokio_util::codec::{Framed, BytesCodec};
@@ -16,6 +15,7 @@ use crate::utils::network::random_ipv4_socket_address;
 
 mod codec;
 mod request;
+pub mod model;
 pub mod database;
 pub mod metadata_type;
 
@@ -41,30 +41,6 @@ impl ClientState {
 pub enum Event {
     RemoteDBServer,
     Unsupported,
-}
-
-
-#[derive(Debug)]
-pub struct Metadata {
-    pub artist: String,
-    pub title: String,
-    pub bpm: u16,
-    pub album: String,
-}
-
-#[derive(Debug)]
-pub struct Track {
-    pub metadata: Metadata,
-    pub path: PathBuf,
-}
-
-impl Track {
-    pub fn new(metadata: Metadata, path: PathBuf) -> Self {
-        Self {
-            metadata,
-            path,
-        }
-    }
 }
 
 fn ok_request() -> Bytes {
