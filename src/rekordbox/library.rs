@@ -87,7 +87,7 @@ impl Controller for NavigationController {
         let request_type = request.message.request_type;
         let mut bytes: BytesMut = request.to_response();
         let request_type_value = request_type.value();
-        let items_to_render: u32 = 1u32;
+        let items_to_render: u32 = 2u32;
 
         bytes.extend(ok_request());
         bytes.extend(Bytes::from(
