@@ -237,34 +237,6 @@ impl Controller for TitleController {
     }
 }
 
-struct Response {
-    buffer: BytesMut,
-}
-
-impl Response {
-    pub fn new() -> Response {
-        Response {
-            buffer: BytesMut::new(),
-        }
-    }
-
-    fn extend_items(&mut self, items: Vec<Bytes>) {
-        for item in items {
-            self.extend(item)
-        }
-    }
-
-    fn extend(&mut self, item: Bytes) {
-        self.buffer.extend(item)
-    }
-}
-
-impl From<Response> for Bytes {
-    fn from(response: Response) -> Bytes {
-        Bytes::from(response.buffer)
-    }
-}
-
 fn build_message_header(transaction_id: &DBField) -> DBMessage {
     DBMessage::new(
         transaction_id.clone(),
