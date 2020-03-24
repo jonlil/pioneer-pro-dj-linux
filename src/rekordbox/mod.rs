@@ -39,6 +39,6 @@ use rpc::server as rpc_server;
 use library::DBLibraryServer;
 pub use packets::DBMessage;
 pub use library::model::{MetadataTrack, Metadata};
-pub use library::database::{Track, Artist};
+pub use library::database::{Track, Artist, Record};
 pub use library::database::Database;
 use library::metadata_type;

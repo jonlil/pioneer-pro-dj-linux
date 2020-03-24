@@ -38,24 +38,35 @@ struct NewArtist {
     name: String,
 }
 
+#[derive(Clone)]
 pub struct Artist {
     id: u32,
     name: String,
 }
 
-trait Record {
-    fn name();
-    fn id();
+pub trait Record {
+    fn name(&self) -> &String;
+    fn id(&self) -> &u32;
 }
 
 impl Record for Track {
-    fn name() {}
-    fn id() {}
+    fn name(&self) -> &String {
+        &self.title
+    }
+
+    fn id(&self) -> &u32 {
+        &self.id
+    }
 }
 
 impl Record for Artist {
-    fn name() {}
-    fn id() {}
+    fn name(&self) -> &String {
+        &self.name
+    }
+
+    fn id(&self) -> &u32 {
+        &self.id
+    }
 }
 
 impl Insertable<NewArtist, u32> for ArtistTable<Artist> {
@@ -190,11 +201,11 @@ impl Database {
         database
     }
 
-    pub fn artists(&self) -> Vec<String> {
+    pub fn artists(&self) -> Vec<Artist> {
         let mut ret = vec![];
         self.read(&mut |reader| {
             for (id, artist) in &reader.artists.rows {
-                ret.push(artist.name.clone());
+                ret.push(artist.clone());
             }
         });
 

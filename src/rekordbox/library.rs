@@ -10,12 +10,13 @@ use super::packets::{DBMessage, ManyDBMessages, Arguments};
 use super::db_field::{DBField, DBFieldType};
 use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
-use crate::rekordbox::{Database, ServerState};
+use crate::rekordbox::{Database, ServerState, Record};
 use crate::utils::network::random_ipv4_socket_address;
 
 mod codec;
 mod request;
 mod fixtures;
+mod helper;
 pub mod model;
 pub mod database;
 pub mod metadata_type;
@@ -23,6 +24,7 @@ pub mod metadata_type;
 pub use metadata_type::*;
 use request::{Controller, RequestWrapper, RequestHandler};
 use fixtures::PREVIEW_WAVEFORM_RESPONSE;
+use helper::*;
 
 pub struct ClientState {
     previous_request: Option<DBRequestType>,
@@ -83,11 +85,15 @@ impl Controller for RootMenuController {
 
 struct NavigationController;
 impl Controller for NavigationController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes {
         let request_type = request.message.request_type;
         let mut bytes: BytesMut = request.to_response();
         let request_type_value = request_type.value();
-        let items_to_render: u32 = 2u32;
+
+        let items_to_render = match request_type {
+            DBRequestType::ArtistRequest => number_of_artists(&context.database),
+            _ => 0u32,
+        };
 
         bytes.extend(ok_request());
         bytes.extend(Bytes::from(
@@ -197,12 +203,11 @@ impl RenderController {
             build_message_header(&transaction_id),
         ]);
 
-        for (index, artist) in context.database.artists().into_iter().enumerate() {
-            let artist_id = index + 1;
+        for artist in context.database.artists() {
             response.push(build_message_item(&transaction_id,
-                artist.as_str(),
+                artist.name().as_str(),
                 metadata_type::ARTIST,
-                artist_id as u32,
+                *artist.id(),
             ));
         }
 
