@@ -27,6 +27,7 @@ struct NewTrack {
     path: PathBuf,
 }
 
+#[derive(Clone)]
 pub struct Track {
     id: u32,
     artist_id: u32,
@@ -212,11 +213,14 @@ impl Database {
         ret
     }
 
-    pub fn title_by_artist(&self, artist: u32) -> Vec<String> {
-        let mut titles: Vec<String> = vec![];
+    pub fn title_by_artist(&self, artist_id: u32) -> Vec<Track> {
+        let mut titles: Vec<Track> = vec![];
         self.read(&mut |reader| {
-            for (id, track) in &reader.tracks.rows {
-                titles.push(track.title.clone());
+            for (_id, track) in &reader.tracks.rows {
+                if track.artist_id != artist_id {
+                    continue
+                }
+                titles.push(track.clone());
             }
         });
         titles

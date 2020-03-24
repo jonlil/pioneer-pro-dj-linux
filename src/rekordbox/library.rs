@@ -87,13 +87,20 @@ struct NavigationController;
 impl Controller for NavigationController {
     fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes {
         let request_type = request.message.request_type;
-        let mut bytes: BytesMut = request.to_response();
-        let request_type_value = request_type.value();
-
         let items_to_render = match request_type {
             DBRequestType::ArtistRequest => number_of_artists(&context.database),
-            _ => 0u32,
+            DBRequestType::AlbumByArtistRequest => {
+                let artist_id = dbfield_to_u32(&request.message.arguments[2]);
+                number_of_tracks_by_artist(artist_id, &context.database)
+            },
+            _ => {
+                dbg!(request_type);
+                0u32
+            },
         };
+
+        let mut bytes: BytesMut = request.to_response();
+        let request_type_value = request_type.value();
 
         bytes.extend(ok_request());
         bytes.extend(Bytes::from(
@@ -268,15 +275,12 @@ impl RenderController {
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
-
-        let title_iterator = context.database.title_by_artist(artist_id).into_iter();
-        for (index, track) in title_iterator.enumerate() {
-            let track_id = index + 1;
+        for track in context.database.title_by_artist(artist_id) {
             response.push(build_message_item(
                 &transaction_id,
-                track.as_str(),
+                &track.name().clone(),
                 metadata_type::TITLE,
-                track_id as u32,
+                *track.id(),
             ));
         }
 
