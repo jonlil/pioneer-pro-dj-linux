@@ -9,12 +9,12 @@ pub struct Metadata {
 }
 
 #[derive(Debug)]
-pub struct Track {
+pub struct MetadataTrack {
     pub metadata: Metadata,
     pub path: PathBuf,
 }
 
-impl Track {
+impl MetadataTrack {
     pub fn new(metadata: Metadata, path: PathBuf) -> Self {
         Self {
             metadata,

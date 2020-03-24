@@ -4,7 +4,10 @@ use id3::{Tag, v1 as id3v1};
 use std::fs::File;
 use std::ffi::OsStr;
 use std::io;
-use crate::rekordbox::{Metadata, Track};
+use crate::rekordbox::{
+    Metadata,
+    MetadataTrack as Track,
+};
 
 fn is_hidden(entry: &DirEntry) -> bool {
     entry.file_name()

@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard, Mutex};
 use std::collections::HashMap;
 use std::ops::Add;
 
-use crate::rekordbox::Track as MetadataTrack;
+use crate::rekordbox::MetadataTrack;
 use crate::library::scan_folder;
 
 #[derive(Debug)]
@@ -27,7 +27,7 @@ struct NewTrack {
     path: PathBuf,
 }
 
-struct Track {
+pub struct Track {
     id: u32,
     artist_id: u32,
     title: String,
@@ -38,7 +38,7 @@ struct NewArtist {
     name: String,
 }
 
-struct Artist {
+pub struct Artist {
     id: u32,
     name: String,
 }
