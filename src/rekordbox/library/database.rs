@@ -32,7 +32,13 @@ pub struct Track {
     id: u32,
     artist_id: u32,
     title: String,
-    path: PathBuf,
+    pub path: PathBuf,
+}
+
+impl Track {
+    pub fn path(&self) -> &str {
+        self.path.to_str().unwrap()
+    }
 }
 
 struct NewArtist {
@@ -200,6 +206,20 @@ impl Database {
         }
 
         database
+    }
+
+    pub fn get_track(&self, track_id: u32) -> Option<Track> {
+        let mut ret = None;
+        self.read(&mut |reader| {
+            match reader.tracks.rows.get(&track_id) {
+                Some(track) => {
+                    ret = Some(track.clone());
+                },
+                _ => {},
+            }
+        });
+
+        ret
     }
 
     pub fn artists(&self) -> Vec<Artist> {

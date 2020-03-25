@@ -414,70 +414,75 @@ impl RenderController {
         ])
     }
 
-    fn render_mount_info(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
+    fn render_mount_info(&self, request: RequestWrapper, context: &ClientState, track_id: u32) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
 
         let mut resp = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
 
-        resp.push(DBMessage::new(
-            transaction_id.clone(),
-            DBRequestType::MenuItem,
-            Arguments {
-                _type: metadata_type::TITLE,
-                entry_id2: 1,
-                ..Default::default()
-            },
-        ));
+        match context.database.get_track(track_id) {
+            Some(track) => {
+                resp.push(DBMessage::new(
+                    transaction_id.clone(),
+                    DBRequestType::MenuItem,
+                    Arguments {
+                        _type: metadata_type::TITLE,
+                        entry_id2: 1,
+                        ..Default::default()
+                    },
+                ));
 
-        resp.push(DBMessage::new(
-            transaction_id.clone(),
-            DBRequestType::MenuItem,
-            Arguments {
-                _type: metadata_type::DURATION,
-                entry_id2: 195,
-                ..Default::default()
+                resp.push(DBMessage::new(
+                    transaction_id.clone(),
+                    DBRequestType::MenuItem,
+                    Arguments {
+                        _type: metadata_type::DURATION,
+                        entry_id2: 195,
+                        ..Default::default()
+                    },
+                ));
+                resp.push(DBMessage::new(
+                    transaction_id.clone(),
+                    DBRequestType::MenuItem,
+                    Arguments {
+                        _type: metadata_type::BPM,
+                        entry_id2: 12800,
+                        ..Default::default()
+                    },
+                ));
+                resp.push(DBMessage::new(
+                    transaction_id.clone(),
+                    DBRequestType::MenuItem,
+                    Arguments {
+                        _type: metadata_type::COMMENT,
+                        value1: "Tracks by www.loopmasters.com",
+                        ..Default::default()
+                    },
+                ));
+                resp.push(DBMessage::new(
+                    transaction_id.clone(),
+                    DBRequestType::MenuItem,
+                    Arguments {
+                        _type: metadata_type::MOUNT_PATH,
+                        entry_id1: 7869988,
+                        entry_id2: 5,
+                        value1: track.path(),
+                        ..Default::default()
+                    },
+                ));
+                resp.push(DBMessage::new(
+                    transaction_id.clone(),
+                    DBRequestType::MenuItem,
+                    Arguments {
+                        _type: metadata_type::UNKNOWN1,
+                        entry_id2: 1,
+                        ..Default::default()
+                    },
+                ));
             },
-        ));
-        resp.push(DBMessage::new(
-            transaction_id.clone(),
-            DBRequestType::MenuItem,
-            Arguments {
-                _type: metadata_type::BPM,
-                entry_id2: 12800,
-                ..Default::default()
-            },
-        ));
-        resp.push(DBMessage::new(
-            transaction_id.clone(),
-            DBRequestType::MenuItem,
-            Arguments {
-                _type: metadata_type::COMMENT,
-                value1: "Tracks by www.loopmasters.com",
-                ..Default::default()
-            },
-        ));
-        resp.push(DBMessage::new(
-            transaction_id.clone(),
-            DBRequestType::MenuItem,
-            Arguments {
-                _type: metadata_type::MOUNT_PATH,
-                entry_id1: 7869988,
-                entry_id2: 5,
-                value1: "/home/jonas/Music/PioneerDJ/Demo Tracks/Demo Track 1.mp3",
-                ..Default::default()
-            },
-        ));
-        resp.push(DBMessage::new(
-            transaction_id.clone(),
-            DBRequestType::MenuItem,
-            Arguments {
-                _type: metadata_type::UNKNOWN1,
-                entry_id2: 1,
-                ..Default::default()
-            },
-        ));
+            None => panic!("Should not happen"),
+        };
 
         resp.push(DBMessage::new(
             transaction_id,
@@ -491,9 +496,14 @@ impl RenderController {
 
 struct QueryMountInfoController;
 impl Controller for QueryMountInfoController {
-    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
         let request_type_value = request.message.request_type.value();
         let items_to_render: u32 = 6u32;
+        let track_id = dbfield_to_u32(&request.message.arguments[1]);
+
+        context.set_previous_request(StatefulRequest::MountInfoRequest {
+            track_id,
+        });
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
@@ -585,7 +595,7 @@ enum StatefulRequest {
     AlbumByArtistRequest { artist_id: u32 },
     TitleByArtistAlbumRequest { artist_id: u32 },
     MetadataRequest,
-    MountInfoRequest,
+    MountInfoRequest { track_id: u32 },
 }
 
 impl Controller for RenderController {
@@ -597,7 +607,7 @@ impl Controller for RenderController {
             Some(StatefulRequest::AlbumByArtistRequest { artist_id }) => self.render_album_by_artist(request, context, artist_id),
             Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id }) => self.render_title_by_artist_album(request, context, artist_id),
             Some(StatefulRequest::MetadataRequest) => self.render_metadata(request, context),
-            Some(StatefulRequest::MountInfoRequest) => self.render_mount_info(request, context),
+            Some(StatefulRequest::MountInfoRequest { track_id }) => self.render_mount_info(request, context, track_id),
             _ => ManyDBMessages::new(vec![]),
         })
     }
@@ -632,7 +642,7 @@ fn handle_sequence_requests(context: &mut ClientState, request_type: &DBRequestT
         DBRequestType::TitleRequest => context.set_previous_request(StatefulRequest::TitleRequest),
         DBRequestType::RootMenuRequest => context.set_previous_request(StatefulRequest::RootMenuRequest),
         DBRequestType::MetadataRequest => context.set_previous_request(StatefulRequest::MetadataRequest),
-        DBRequestType::MountInfoRequest => context.set_previous_request(StatefulRequest::MountInfoRequest),
+        DBRequestType::MountInfoRequest => {},
         _ => {},
     };
 }
