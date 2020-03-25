@@ -3,7 +3,7 @@ use crate::rekordbox::DBMessage;
 use crate::rekordbox::library::ClientState;
 
 pub trait Controller {
-    fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes;
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes;
 }
 
 pub struct RequestWrapper {
