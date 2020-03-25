@@ -27,7 +27,7 @@ use fixtures::PREVIEW_WAVEFORM_RESPONSE;
 use helper::*;
 
 pub struct ClientState {
-    previous_request: Option<DBRequestType>,
+    previous_request: Option<StatefulRequest>,
     state: Arc<Mutex<ServerState>>,
     database: Arc<Database>,
 }
@@ -39,6 +39,10 @@ impl ClientState {
             state,
             database,
         }
+    }
+
+    fn set_previous_request(&mut self, previous_request: StatefulRequest) {
+        self.previous_request = Some(previous_request);
     }
 }
 
@@ -53,7 +57,7 @@ fn ok_request() -> Bytes {
 
 struct SetupController;
 impl Controller for SetupController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
@@ -68,7 +72,7 @@ impl Controller for SetupController {
 
 struct RootMenuController;
 impl Controller for RootMenuController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
@@ -83,30 +87,40 @@ impl Controller for RootMenuController {
     }
 }
 
-struct NavigationController;
-impl Controller for NavigationController {
-    fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes {
-        let request_type = request.message.request_type;
-        let items_to_render = match request_type {
-            DBRequestType::ArtistRequest => number_of_artists(&context.database),
-            DBRequestType::AlbumByArtistRequest => {
-                let artist_id = dbfield_to_u32(&request.message.arguments[2]);
-                number_of_tracks_by_artist(artist_id, &context.database)
-            },
-            _ => {
-                dbg!(request_type);
-                0u32
-            },
-        };
+struct AlbumByArtistController;
+impl Controller for AlbumByArtistController {
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
+        let request_type = &request.message.request_type.value();
+        let artist_id = dbfield_to_u32(&request.message.arguments[2]);
 
         let mut bytes: BytesMut = request.to_response();
-        let request_type_value = request_type.value();
+        bytes.extend(ok_request());
+        bytes.extend(Bytes::from(
+            ArgumentCollection::new(vec![
+                DBField::from([0u8, 0u8, request_type[0], request_type[1]]),
+                DBField::from(number_of_tracks_by_artist(artist_id, &context.database)),
+            ]),
+        ));
+
+        context.set_previous_request(StatefulRequest::AlbumByArtistRequest {
+            artist_id,
+        });
+
+        Bytes::from(bytes)
+    }
+}
+
+struct ArtistController;
+impl Controller for ArtistController {
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
+        let request_type = &request.message.request_type.value();
+        let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
         bytes.extend(Bytes::from(
             ArgumentCollection::new(vec![
-                DBField::from([0u8, 0u8, request_type_value[0], request_type_value[1]]),
-                DBField::from(items_to_render),
+                DBField::from([0u8, 0u8, request_type[0], request_type[1]]),
+                DBField::from(number_of_artists(&context.database)),
             ]),
         ));
 
@@ -116,7 +130,7 @@ impl Controller for NavigationController {
 
 struct PreviewWaveformController;
 impl Controller for PreviewWaveformController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
         bytes.extend(Bytes::from(DBField::from([0x44, 0x02])));
         bytes.extend(Bytes::from(ArgumentCollection::new(vec![
@@ -132,7 +146,7 @@ impl Controller for PreviewWaveformController {
 
 struct TitleController;
 impl Controller for TitleController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
         request.to_response().freeze()
     }
 }
@@ -247,7 +261,7 @@ impl RenderController {
         response
     }
 
-    fn render_album_by_artist(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
+    fn render_album_by_artist(&self, request: RequestWrapper, _context: &ClientState, _artist_id: u32) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
@@ -268,14 +282,15 @@ impl RenderController {
         response
     }
 
-    fn render_title_by_artist_album(&self, request: RequestWrapper, context: &ClientState) -> ManyDBMessages {
+    fn render_title_by_artist_album(&self, request: RequestWrapper, context: &ClientState, artist_id: u32) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
-        let artist_id = dbfield_to_u32(&request.message.arguments[2]);
+        let tracks = context.database.title_by_artist(artist_id);
 
         let mut response = ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
         ]);
-        for track in context.database.title_by_artist(artist_id) {
+
+        for track in tracks {
             response.push(build_message_item(
                 &transaction_id,
                 &track.name().clone(),
@@ -476,7 +491,7 @@ impl RenderController {
 
 struct QueryMountInfoController;
 impl Controller for QueryMountInfoController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
         let request_type_value = request.message.request_type.value();
         let items_to_render: u32 = 6u32;
 
@@ -507,9 +522,14 @@ fn dbfield_to_u32(input: &DBField) -> u32 {
 
 struct TitleByArtistAlbumController;
 impl Controller for TitleByArtistAlbumController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
+        let artist_id = dbfield_to_u32(&request.message.arguments[2]);
         let request_type_value = request.message.request_type.value();
-        let number_of_tracks_by_artist = 5u32;
+        let number_of_tracks_by_artist = number_of_tracks_by_artist(artist_id, &context.database);
+
+        context.set_previous_request(StatefulRequest::TitleByArtistAlbumRequest {
+            artist_id,
+        });
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
@@ -524,7 +544,7 @@ impl Controller for TitleByArtistAlbumController {
 
 struct MetadataController;
 impl Controller for MetadataController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
         let request_type_value = request.message.request_type.value();
 
         Bytes::from(DBMessage::new(
@@ -540,7 +560,7 @@ impl Controller for MetadataController {
 
 struct LoadTrackController;
 impl Controller for LoadTrackController {
-    fn to_response(&self, request: RequestWrapper, _context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
         let request_type_value = request.message.request_type.value();
 
         Bytes::from(DBMessage::new(
@@ -557,16 +577,27 @@ impl Controller for LoadTrackController {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum StatefulRequest {
+    RootMenuRequest,
+    ArtistRequest,
+    TitleRequest,
+    AlbumByArtistRequest { artist_id: u32 },
+    TitleByArtistAlbumRequest { artist_id: u32 },
+    MetadataRequest,
+    MountInfoRequest,
+}
+
 impl Controller for RenderController {
-    fn to_response(&self, request: RequestWrapper, context: &ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
         Bytes::from(match context.previous_request {
-            Some(DBRequestType::RootMenuRequest) => self.render_root_menu(request, context),
-            Some(DBRequestType::ArtistRequest) => self.render_artist_page(request, context),
-            Some(DBRequestType::TitleRequest) => self.render_title_page(request, context),
-            Some(DBRequestType::AlbumByArtistRequest) => self.render_album_by_artist(request, context),
-            Some(DBRequestType::TitleByArtistAlbumRequest) => self.render_title_by_artist_album(request, context),
-            Some(DBRequestType::MetadataRequest) => self.render_metadata(request, context),
-            Some(DBRequestType::MountInfoRequest) => self.render_mount_info(request, context),
+            Some(StatefulRequest::RootMenuRequest) => self.render_root_menu(request, context),
+            Some(StatefulRequest::ArtistRequest) => self.render_artist_page(request, context),
+            Some(StatefulRequest::TitleRequest) => self.render_title_page(request, context),
+            Some(StatefulRequest::AlbumByArtistRequest { artist_id }) => self.render_album_by_artist(request, context, artist_id),
+            Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id }) => self.render_title_by_artist_album(request, context, artist_id),
+            Some(StatefulRequest::MetadataRequest) => self.render_metadata(request, context),
+            Some(StatefulRequest::MountInfoRequest) => self.render_mount_info(request, context),
             _ => ManyDBMessages::new(vec![]),
         })
     }
@@ -574,8 +605,8 @@ impl Controller for RenderController {
 
 fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
     match request_type {
-        DBRequestType::AlbumByArtistRequest => Some(Box::new(NavigationController)),
-        DBRequestType::ArtistRequest => Some(Box::new(NavigationController)),
+        DBRequestType::AlbumByArtistRequest => Some(Box::new(AlbumByArtistController)),
+        DBRequestType::ArtistRequest => Some(Box::new(ArtistController)),
         DBRequestType::LoadTrackRequest => Some(Box::new(LoadTrackController)),
         DBRequestType::MetadataRequest => Some(Box::new(MetadataController)),
         DBRequestType::MountInfoRequest => Some(Box::new(QueryMountInfoController)),
@@ -587,6 +618,23 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
         DBRequestType::TitleRequest => Some(Box::new(TitleController)),
         _ => None,
     }
+}
+
+/// This is a post processor of the request
+///
+/// Some Controllers will extract some data from the request that is required
+/// for executing a future client request.
+fn handle_sequence_requests(context: &mut ClientState, request_type: &DBRequestType) {
+    match request_type {
+        DBRequestType::AlbumByArtistRequest => {},
+        DBRequestType::TitleByArtistAlbumRequest => {},
+        DBRequestType::ArtistRequest => context.set_previous_request(StatefulRequest::ArtistRequest),
+        DBRequestType::TitleRequest => context.set_previous_request(StatefulRequest::TitleRequest),
+        DBRequestType::RootMenuRequest => context.set_previous_request(StatefulRequest::RootMenuRequest),
+        DBRequestType::MetadataRequest => context.set_previous_request(StatefulRequest::MetadataRequest),
+        DBRequestType::MountInfoRequest => context.set_previous_request(StatefulRequest::MountInfoRequest),
+        _ => {},
+    };
 }
 
 fn process(
@@ -602,18 +650,19 @@ fn process(
     match DBMessage::parse(&bytes) {
         Ok((_unprocessed_bytes, message)) => {
             if let Some(request_handler) = get_controller(&message.request_type) {
-                let request_type = &message.request_type.clone();
-                let bytes = RequestHandler::new(
+                handle_sequence_requests(context, &message.request_type);
+
+                return RequestHandler::new(
                     request_handler,
                     message,
                     context,
-                ).respond_to();
-
-                context.previous_request = Some(*request_type);
-
-                return bytes;
+                ).respond_to()
             } else {
-                eprintln!("Not covered: {:?}", bytes);
+                eprintln!(
+                    "DBRequestType: {:?} has no controller implemented.\nRaw bytes: {:?}",
+                    &message.request_type,
+                    bytes
+                );
             }
         },
         Err(nom::Err::Error((bytes, _))) => eprintln!("Error: {:?}", bytes),
@@ -717,7 +766,7 @@ mod test {
 
     pub struct TestController;
     impl Controller for TestController {
-        fn to_response(&self, _request: RequestWrapper, _context: &ClientState) -> Bytes {
+        fn to_response(&self, _request: RequestWrapper, _context: &mut ClientState) -> Bytes {
             Bytes::from("my-very-test-value")
         }
     }
@@ -747,35 +796,16 @@ mod test {
     }
 
     #[test]
-    fn test_root_menu_dialog() {
-        let dialog = fixtures::root_menu_dialog();
-        let mut context = context();
-        let peer_addr = peer();
-
-        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::RootMenuRequest), context.previous_request);
-        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
-    }
-
-    #[test]
-    fn test_artist_dialog_response() {
-        let dialog = fixtures::artist_dialog();
-        let peer_addr = peer();
-        let mut context = context();
-
-        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::ArtistRequest), context.previous_request);
-        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
-    }
-
-    #[test]
     fn test_album_by_artist_dialog() {
         let dialog = fixtures::album_by_artist_dialog();
         let mut context = context();
         let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::AlbumByArtistRequest), context.previous_request);
+        assert_eq!(
+            Some(StatefulRequest::AlbumByArtistRequest { artist_id: 0u32 }),
+            context.previous_request,
+        );
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
@@ -786,7 +816,10 @@ mod test {
         let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
+        assert_eq!(
+            Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id: 0u32 }),
+            context.previous_request,
+        );
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 
@@ -797,50 +830,7 @@ mod test {
         let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::TitleByArtistAlbumRequest), context.previous_request);
+        assert_eq!(Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id: 0u32 }), context.previous_request);
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
-    }
-
-    #[test]
-    #[ignore]
-    fn test_metadata_dialog() {
-        let dialog = fixtures::metadata_dialog();
-        let mut context = context();
-        let peer_addr = peer();
-
-        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::MetadataRequest), context.previous_request);
-        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
-    }
-
-    #[test]
-    #[ignore = "matches against hardcoded, should be enabled when we have a database."]
-    fn test_mount_info_dialog() {
-        let dialog = fixtures::mount_info_request_dialog();
-        let mut context = context();
-        let peer_addr = peer();
-
-        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::MountInfoRequest), context.previous_request);
-        assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
-    }
-
-    #[test]
-    fn test_preview_waveform_request() {
-        let dialog = fixtures::preview_waveform_request();
-        let mut context = context();
-        let peer_addr = peer();
-
-        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-    }
-
-    #[test]
-    fn test_load_track_request() {
-        let dialog = fixtures::load_track_request();
-        let mut context = context();
-        let peer_addr = peer();
-
-        assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(DBRequestType::LoadTrackRequest), context.previous_request);
     }
 }
