@@ -4,7 +4,7 @@ use std::path::PathBuf;
 pub struct Metadata {
     pub artist: String,
     pub title: String,
-    pub bpm: u16,
+    pub bpm: Option<u32>,
     pub album: String,
 }
 
@@ -12,13 +12,15 @@ pub struct Metadata {
 pub struct MetadataTrack {
     pub metadata: Metadata,
     pub path: PathBuf,
+    pub size: u32,
 }
 
 impl MetadataTrack {
-    pub fn new(metadata: Metadata, path: PathBuf) -> Self {
+    pub fn new(metadata: Metadata, path: PathBuf, size: u32) -> Self {
         Self {
             metadata,
             path,
+            size,
         }
     }
 }

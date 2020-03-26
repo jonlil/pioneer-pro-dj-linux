@@ -25,14 +25,18 @@ struct NewTrack {
     artist_id: u32,
     title: String,
     path: PathBuf,
+    size: u32,
+    bpm: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Track {
     id: u32,
-    artist_id: u32,
+    pub artist_id: u32,
     title: String,
     pub path: PathBuf,
+    pub size: u32,
+    pub bpm: Option<u32>,
 }
 
 impl Track {
@@ -106,6 +110,8 @@ impl Insertable<NewTrack, u32> for TrackTable<Track> {
                     artist_id: document.artist_id,
                     path: document.path,
                     title: document.title,
+                    size: document.size,
+                    bpm: document.bpm,
                 });
                 return id;
             },
@@ -269,6 +275,8 @@ impl Database {
                 artist_id,
                 path: track.path,
                 title: track.metadata.title,
+                size: track.size,
+                bpm: track.metadata.bpm,
             });
 
             Ok(())

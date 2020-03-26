@@ -370,7 +370,7 @@ impl RenderController {
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
                 Arguments {
-                    entry_id2: 12800,
+                    entry_id2: track.bpm.unwrap_or(0),
                     _type: metadata_type::BPM,
                     ..Default::default()
                 },
@@ -459,7 +459,7 @@ impl RenderController {
                     DBRequestType::MenuItem,
                     Arguments {
                         _type: metadata_type::BPM,
-                        entry_id2: 12800,
+                        entry_id2: track.bpm.unwrap_or(0),
                         ..Default::default()
                     },
                 ));
@@ -477,7 +477,7 @@ impl RenderController {
                     DBRequestType::MenuItem,
                     Arguments {
                         _type: metadata_type::MOUNT_PATH,
-                        entry_id1: 7869988,
+                        entry_id1: track.size,
                         entry_id2: 5,
                         value1: track.path(),
                         ..Default::default()

@@ -1,7 +1,8 @@
 use walkdir::{DirEntry, WalkDir};
 use std::path::{Path, PathBuf};
 use id3::{Tag, v1 as id3v1};
-use std::fs::File;
+use std::fs::{File, metadata};
+use std::os::unix::fs::MetadataExt;
 use std::ffi::OsStr;
 use std::io;
 use crate::rekordbox::{
@@ -33,11 +34,28 @@ fn mp3_files_iterator<T: AsRef<Path>>(t: T) -> impl Iterator<Item = DirEntry> {
         .filter(has_mp3_extension)
 }
 
+fn extract_bpm(tag: &Tag) -> Option<u32> {
+    match tag.get("TBPM") {
+        Some(frame) => {
+            match frame.content() {
+                id3::Content::Text(text) => {
+                    match text.parse::<u32>() {
+                        Ok(value) => Some(value * 100),
+                        _ => None,
+                    }
+                },
+                _ => None,
+            }
+        },
+        _ => None,
+    }
+}
+
 fn extract_id3v2(tag: Tag) -> Metadata {
     Metadata {
         artist: tag.artist().unwrap_or("").to_string(),
         title: tag.title().unwrap_or("").to_string(),
-        bpm: 0,
+        bpm: extract_bpm(&tag),
         album: tag.album().unwrap_or("").to_string(),
     }
 }
@@ -46,7 +64,7 @@ fn extract_id3v1<'a>(tag: id3v1::Tag) -> Metadata {
     Metadata {
         artist: tag.artist,
         title: tag.title,
-        bpm: 0,
+        bpm: None,
         album: tag.album,
     }
 }
@@ -73,8 +91,8 @@ impl From<std::io::Error> for LibraryError {
     }
 }
 
-fn metadata_extractor(entry: DirEntry) -> Option<(Metadata, PathBuf)> {
-    let metadata = match Tag::read_from_path(entry.path()) {
+fn metadata_extractor(entry: DirEntry) -> Option<(Metadata, PathBuf, u32)> {
+    let extracted_metadata = match Tag::read_from_path(entry.path()) {
         Ok(tag) => extract_id3v2(tag),
         Err(_) => {
             match File::open(entry.path()) {
@@ -89,12 +107,21 @@ fn metadata_extractor(entry: DirEntry) -> Option<(Metadata, PathBuf)> {
         },
     };
 
-    Some((metadata, entry.path().to_path_buf()))
+    match metadata(entry.path()) {
+        Ok(attributes) => {
+            Some((
+                extracted_metadata,
+                entry.path().to_path_buf(),
+                attributes.size() as u32,
+            ))
+        },
+        _ => None,
+    }
 }
 
 pub fn scan_folder<T: AsRef<Path>>(path: T) -> Vec<Track> {
     mp3_files_iterator(path)
         .filter_map(metadata_extractor)
-        .map(|(metadata, path)| Track::new(metadata, path))
+        .map(|(metadata, path, file_size)| Track::new(metadata, path, file_size))
         .collect()
 }
