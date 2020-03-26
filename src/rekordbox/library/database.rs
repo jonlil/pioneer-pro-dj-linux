@@ -225,7 +225,7 @@ impl Database {
     pub fn artists(&self) -> Vec<Artist> {
         let mut ret = vec![];
         self.read(&mut |reader| {
-            for (id, artist) in &reader.artists.rows {
+            for (_id, artist) in &reader.artists.rows {
                 ret.push(artist.clone());
             }
         });
@@ -233,7 +233,7 @@ impl Database {
         ret
     }
 
-    pub fn find_artist(&self, artist_id: u32) -> Option<Artist> {
+    pub fn get_artist(&self, artist_id: u32) -> Option<Artist> {
         let mut ret = None;
         self.read(&mut |reader| {
             match reader.artists.rows.get(&artist_id) {
