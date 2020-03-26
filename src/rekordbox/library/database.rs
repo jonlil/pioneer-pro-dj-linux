@@ -184,14 +184,6 @@ struct InnerDatabase {
     tracks: TrackTable<Track>,
 }
 
-impl InnerDatabase {
-    fn add(&mut self, track: MetadataTrack) -> Result<(), DatabaseError> {
-        //self.collection.push(track);
-
-        Ok(())
-    }
-}
-
 pub struct Database {
     inner: RwLock<InnerDatabase>,
 }
