@@ -858,11 +858,9 @@ impl From<NfsGetAttrReply> for Bytes {
 
 impl From<Metadata> for NfsGetAttrReply {
     fn from(input: Metadata) -> NfsGetAttrReply {
-        let mut attributes = NfsFileAttributes::from(input);
-
         NfsGetAttrReply {
             status: NfsStatus::Ok,
-            attributes: attributes,
+            attributes: NfsFileAttributes::from(input),
         }
     }
 }

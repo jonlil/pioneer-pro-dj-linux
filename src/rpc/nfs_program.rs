@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{PathBuf, Path};
+use std::path::PathBuf;
 use std::fs::File;
 use std::os::unix::fs::MetadataExt;
 

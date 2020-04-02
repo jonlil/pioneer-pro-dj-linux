@@ -739,7 +739,7 @@ mod test {
     use super::super::fixtures;
     use pretty_assertions::assert_eq;
     use super::super::db_field::{DBField, DBFieldType, Binary};
-    use crate::rekordbox::metadata_type::ARTIST;
+    use crate::rekordbox::library::ARTIST;
 
     #[test]
     fn extract_magic_from_db_message() {

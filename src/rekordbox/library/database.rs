@@ -25,14 +25,18 @@ struct NewTrack {
     artist_id: u32,
     title: String,
     path: PathBuf,
+    size: u32,
+    bpm: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Track {
     id: u32,
-    artist_id: u32,
+    pub artist_id: u32,
     title: String,
     pub path: PathBuf,
+    pub size: u32,
+    pub bpm: Option<u32>,
 }
 
 impl Track {
@@ -106,6 +110,8 @@ impl Insertable<NewTrack, u32> for TrackTable<Track> {
                     artist_id: document.artist_id,
                     path: document.path,
                     title: document.title,
+                    size: document.size,
+                    bpm: document.bpm,
                 });
                 return id;
             },
@@ -178,14 +184,6 @@ struct InnerDatabase {
     tracks: TrackTable<Track>,
 }
 
-impl InnerDatabase {
-    fn add(&mut self, track: MetadataTrack) -> Result<(), DatabaseError> {
-        //self.collection.push(track);
-
-        Ok(())
-    }
-}
-
 pub struct Database {
     inner: RwLock<InnerDatabase>,
 }
@@ -225,7 +223,7 @@ impl Database {
     pub fn artists(&self) -> Vec<Artist> {
         let mut ret = vec![];
         self.read(&mut |reader| {
-            for (id, artist) in &reader.artists.rows {
+            for (_id, artist) in &reader.artists.rows {
                 ret.push(artist.clone());
             }
         });
@@ -233,7 +231,7 @@ impl Database {
         ret
     }
 
-    pub fn find_artist(&self, artist_id: u32) -> Option<Artist> {
+    pub fn get_artist(&self, artist_id: u32) -> Option<Artist> {
         let mut ret = None;
         self.read(&mut |reader| {
             match reader.artists.rows.get(&artist_id) {
@@ -269,6 +267,8 @@ impl Database {
                 artist_id,
                 path: track.path,
                 title: track.metadata.title,
+                size: track.size,
+                bpm: track.metadata.bpm,
             });
 
             Ok(())

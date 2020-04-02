@@ -3,7 +3,7 @@ use super::packets::{DBMessage, ManyDBMessages};
 use super::db_field::DBField;
 use super::db_message_argument::ArgumentCollection;
 use super::db_request_type::DBRequestType;
-use super::metadata_type;
+use super::library::metadata_type;
 use nom::IResult;
 
 type DBMessageParseResult<'a> = IResult<&'a [u8], DBMessage>;

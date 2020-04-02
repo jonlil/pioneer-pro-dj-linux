@@ -13,5 +13,5 @@ pub fn number_of_tracks_by_artist(artist_id: u32, database: &Database) -> u32 {
 }
 
 pub fn find_artist(artist_id: u32, database: &Database) -> Option<Artist> {
-    database.find_artist(artist_id)
+    database.get_artist(artist_id)
 }

@@ -72,7 +72,7 @@ impl Controller for SetupController {
 
 struct RootMenuController;
 impl Controller for RootMenuController {
-    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
@@ -282,7 +282,12 @@ impl RenderController {
         response
     }
 
-    fn render_title_by_artist_album(&self, request: RequestWrapper, context: &ClientState, artist_id: u32) -> ManyDBMessages {
+    fn render_title_by_artist_album(
+        &self,
+        request: RequestWrapper,
+        context: &ClientState,
+        artist_id: u32,
+    ) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
         let tracks = context.database.title_by_artist(artist_id);
 
@@ -308,8 +313,15 @@ impl RenderController {
         response
     }
 
-    fn render_metadata(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
+    fn render_metadata(
+        &self,
+        request: RequestWrapper,
+        context: &ClientState,
+        track_id: u32,
+    ) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
+        let track = context.database.get_track(track_id).unwrap();
+        let artist = context.database.get_artist(track.artist_id).unwrap();
 
         ManyDBMessages::new(vec![
             build_message_header(&transaction_id),
@@ -320,7 +332,7 @@ impl RenderController {
                     entry_id1: 1,
                     entry_id2: 5,
                     entry_id4: 256,
-                    value1: "Demo Track 1",
+                    value1: track.name(),
                     _type: metadata_type::TITLE,
                     ..Default::default()
                 },
@@ -331,7 +343,7 @@ impl RenderController {
                 Arguments {
                     entry_id1: 1,
                     entry_id2: 1,
-                    value1: "Loopmasters",
+                    value1: artist.name(),
                     _type: metadata_type::ARTIST,
                     ..Default::default()
                 },
@@ -358,7 +370,7 @@ impl RenderController {
                 transaction_id.clone(),
                 DBRequestType::MenuItem,
                 Arguments {
-                    entry_id2: 12800,
+                    entry_id2: track.bpm.unwrap_or(0),
                     _type: metadata_type::BPM,
                     ..Default::default()
                 },
@@ -368,7 +380,7 @@ impl RenderController {
                 DBRequestType::MenuItem,
                 Arguments {
                     entry_id2: 5,
-                    value1: "Tracks by www.loopmasters.com",
+                    value1: "",
                     _type: metadata_type::COMMENT,
                     ..Default::default()
                 },
@@ -447,7 +459,7 @@ impl RenderController {
                     DBRequestType::MenuItem,
                     Arguments {
                         _type: metadata_type::BPM,
-                        entry_id2: 12800,
+                        entry_id2: track.bpm.unwrap_or(0),
                         ..Default::default()
                     },
                 ));
@@ -465,7 +477,7 @@ impl RenderController {
                     DBRequestType::MenuItem,
                     Arguments {
                         _type: metadata_type::MOUNT_PATH,
-                        entry_id1: 7869988,
+                        entry_id1: track.size,
                         entry_id2: 5,
                         value1: track.path(),
                         ..Default::default()
@@ -554,8 +566,13 @@ impl Controller for TitleByArtistAlbumController {
 
 struct MetadataController;
 impl Controller for MetadataController {
-    fn to_response(&self, request: RequestWrapper, _context: &mut ClientState) -> Bytes {
+    fn to_response(&self, request: RequestWrapper, context: &mut ClientState) -> Bytes {
         let request_type_value = request.message.request_type.value();
+        let track_id = dbfield_to_u32(&request.message.arguments[1]);
+
+        context.set_previous_request(StatefulRequest::MetadataRequest {
+            track_id,
+        });
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
@@ -594,7 +611,7 @@ enum StatefulRequest {
     TitleRequest,
     AlbumByArtistRequest { artist_id: u32 },
     TitleByArtistAlbumRequest { artist_id: u32 },
-    MetadataRequest,
+    MetadataRequest { track_id: u32 },
     MountInfoRequest { track_id: u32 },
 }
 
@@ -606,7 +623,7 @@ impl Controller for RenderController {
             Some(StatefulRequest::TitleRequest) => self.render_title_page(request, context),
             Some(StatefulRequest::AlbumByArtistRequest { artist_id }) => self.render_album_by_artist(request, context, artist_id),
             Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id }) => self.render_title_by_artist_album(request, context, artist_id),
-            Some(StatefulRequest::MetadataRequest) => self.render_metadata(request, context),
+            Some(StatefulRequest::MetadataRequest { track_id }) => self.render_metadata(request, context, track_id),
             Some(StatefulRequest::MountInfoRequest { track_id }) => self.render_mount_info(request, context, track_id),
             _ => ManyDBMessages::new(vec![]),
         })
@@ -641,7 +658,7 @@ fn handle_sequence_requests(context: &mut ClientState, request_type: &DBRequestT
         DBRequestType::ArtistRequest => context.set_previous_request(StatefulRequest::ArtistRequest),
         DBRequestType::TitleRequest => context.set_previous_request(StatefulRequest::TitleRequest),
         DBRequestType::RootMenuRequest => context.set_previous_request(StatefulRequest::RootMenuRequest),
-        DBRequestType::MetadataRequest => context.set_previous_request(StatefulRequest::MetadataRequest),
+        DBRequestType::MetadataRequest => {},
         DBRequestType::MountInfoRequest => {},
         _ => {},
     };
@@ -673,13 +690,19 @@ fn process(
                     &message.request_type,
                     bytes
                 );
+
+                return DBMessage::new(
+                    message.transaction_id,
+                    DBRequestType::Success,
+                    ArgumentCollection::new(vec![]),
+                ).into();
             }
         },
         Err(nom::Err::Error((bytes, _))) => eprintln!("Error: {:?}", bytes),
         _ => eprintln!("Not covered: {:?}", bytes),
     }
 
-    Bytes::from("Failed processing request into response")
+    Bytes::from("panic")
 }
 
 async fn spawn_library_client_handler(

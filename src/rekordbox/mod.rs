@@ -41,4 +41,3 @@ pub use packets::DBMessage;
 pub use library::model::{MetadataTrack, Metadata};
 pub use library::database::{Track, Artist, Record};
 pub use library::database::Database;
-use library::metadata_type;
