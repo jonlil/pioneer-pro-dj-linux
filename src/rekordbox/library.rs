@@ -690,13 +690,19 @@ fn process(
                     &message.request_type,
                     bytes
                 );
+
+                return DBMessage::new(
+                    message.transaction_id,
+                    DBRequestType::Success,
+                    ArgumentCollection::new(vec![]),
+                ).into();
             }
         },
         Err(nom::Err::Error((bytes, _))) => eprintln!("Error: {:?}", bytes),
         _ => eprintln!("Not covered: {:?}", bytes),
     }
 
-    Bytes::from("Failed processing request into response")
+    Bytes::from("panic")
 }
 
 async fn spawn_library_client_handler(
