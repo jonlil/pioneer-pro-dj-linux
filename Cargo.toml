@@ -5,7 +5,7 @@ authors = ["Jonas Liljestrand <jonas.liljestrand@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-pnet = "0.25.0"
+pnet = "0.27.2"
 ipnetwork = "0.15.0"
 byteorder = "1.3.1"
 tokio = { version = "0.2.0", features = ["full"] }
