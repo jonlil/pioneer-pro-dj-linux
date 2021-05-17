@@ -24,9 +24,9 @@ impl KeepAliveMacPackage {
             unknown1: 1,
             device_type: DeviceType::Rekordbox,
             content: KeepAliveContentType::Mac(Mac {
-                iteration: iteration,
+                iteration,
                 unknown2: 4,
-                mac_addr: mac_addr,
+                mac_addr,
             }),
         }
     }
@@ -348,7 +348,7 @@ impl From<Mac> for Bytes {
 
         buf.put_u8(value.iteration);
         buf.put_u8(value.unknown2);
-        buf.put(mac_addr_to_bytes(value.mac_addr));
+        buf.extend_from_slice(&value.mac_addr.octets());
 
         buf.freeze()
     }
@@ -437,7 +437,7 @@ impl From<Ip> for Bytes {
     fn from(ip: Ip) -> Bytes {
         let mut buf = BytesMut::with_capacity(16);
         buf.put(ip_addr_to_bytes(ip.ip_addr));
-        buf.put(mac_addr_to_bytes(ip.mac_addr));
+        buf.extend_from_slice(&ip.mac_addr.octets());
         buf.put_u8(ip.map_sequence_byte());
         buf.put_u8(ip.iteration);
         buf.put_u8(4u8);
@@ -577,7 +577,7 @@ impl From<Status> for Bytes {
         let mut buf = BytesMut::with_capacity(15);
         buf.put_u8(value.player_number);
         buf.put_u8(value.unknown2);
-        buf.put(mac_addr_to_bytes(value.mac_addr));
+        buf.extend_from_slice(&value.mac_addr.octets());
         buf.put(ip_addr_to_bytes(value.ip_addr));
         buf.put_u8(value.device_count);
         buf.put_u8(1u8);
@@ -599,10 +599,6 @@ impl Decoder<MacAddr> for MacAddr {
 
         Ok((input, MacAddr::new(a, b, c, d, e, f)))
     }
-}
-
-fn mac_addr_to_bytes(mac_addr: MacAddr) -> Bytes {
-    Bytes::from(<[u8; 6]>::from(mac_addr).to_vec())
 }
 
 fn ip_addr_to_bytes(ip_addr: Ipv4Addr) -> Bytes {
