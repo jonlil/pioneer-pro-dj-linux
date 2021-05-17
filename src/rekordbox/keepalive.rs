@@ -1,18 +1,18 @@
-use std::convert::TryFrom;
-use std::net::{UdpSocket, SocketAddr, IpAddr, Ipv4Addr};
-use std::thread;
-use std::time::Duration;
-use pnet::datalink::{MacAddr};
-use bytes::{Bytes, BytesMut, BufMut};
-use super::packets::{UdpMagic, ModelName};
+use super::packets::{ModelName, UdpMagic};
 use super::EventHandler;
+use bytes::{BufMut, Bytes, BytesMut};
 use nom::{
-    IResult,
-    number::complete::{be_u32, be_u16, be_u8},
-    sequence::tuple,
     bytes::complete::take,
     error::ErrorKind::Switch,
+    number::complete::{be_u16, be_u32, be_u8},
+    sequence::tuple,
+    IResult,
 };
+use pnet::datalink::MacAddr;
+use std::convert::TryFrom;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::thread;
+use std::time::Duration;
 
 pub struct KeepAliveMacPackage;
 impl KeepAliveMacPackage {
@@ -24,9 +24,9 @@ impl KeepAliveMacPackage {
             unknown1: 1,
             device_type: DeviceType::Rekordbox,
             content: KeepAliveContentType::Mac(Mac {
-                iteration: iteration,
+                iteration,
                 unknown2: 4,
-                mac_addr: mac_addr,
+                mac_addr,
             }),
         }
     }
@@ -54,24 +54,27 @@ impl KeepAliveIpPackage {
 
 pub struct KeepAliveStatusPackage;
 impl KeepAliveStatusPackage {
-    pub fn new(ip_addr: Ipv4Addr, mac_addr: MacAddr, unknown3: u16, unknown4: u8) -> KeepAlivePacket {
+    pub fn new(
+        ip_addr: Ipv4Addr,
+        mac_addr: MacAddr,
+        unknown3: u16,
+        unknown4: u8,
+    ) -> KeepAlivePacket {
         KeepAlivePacket {
             kind: KeepAlivePacketType::Status,
             subkind: KeepAlivePacketSubType::Status,
             model: ModelName::new("rekordbox".to_string()),
             unknown1: 1,
             device_type: DeviceType::Rekordbox,
-            content: KeepAliveContentType::Status(
-                Status {
-                    player_number: 17,
-                    unknown2: 1,
-                    ip_addr,
-                    mac_addr,
-                    device_count: 1,
-                    unknown3,
-                    unknown4,
-                },
-            ),
+            content: KeepAliveContentType::Status(Status {
+                player_number: 17,
+                unknown2: 1,
+                ip_addr,
+                mac_addr,
+                device_count: 1,
+                unknown3,
+                unknown4,
+            }),
         }
     }
 }
@@ -97,18 +100,12 @@ pub struct KeepAliveServer {
 
 impl KeepAliveServer {
     pub fn new(socket: UdpSocket, options: KeepAliveServerOptions) -> KeepAliveServer {
-        KeepAliveServer {
-            options,
-            socket,
-        }
+        KeepAliveServer { options, socket }
     }
 
     pub fn bind(options: KeepAliveServerOptions) -> Result<KeepAliveServer, String> {
         let socket = get_socket(options.socket_addr)?;
-        let server = KeepAliveServer {
-            options,
-            socket,
-        };
+        let server = KeepAliveServer { options, socket };
 
         server.set_broadcast()?;
 
@@ -128,17 +125,21 @@ impl KeepAliveServer {
             Ok((number_of_bytes, peer)) => {
                 match KeepAlivePacket::try_from(Bytes::from(buffer[..number_of_bytes].to_vec())) {
                     Ok(packet) => event_handler.on_event((packet, peer)),
-                    Err(_err) => eprintln!("Failed decoding KeepAlivePacket: {:?}", &buffer[..number_of_bytes]),
+                    Err(_err) => eprintln!(
+                        "Failed decoding KeepAlivePacket: {:?}",
+                        &buffer[..number_of_bytes]
+                    ),
                 }
-            },
-            Err(_err) => {},
+            }
+            Err(_err) => {}
         };
     }
 
     fn set_broadcast(&self) -> Result<(), String> {
-        self.socket.set_broadcast(true).map_err(|err| format!("{}", err))
+        self.socket
+            .set_broadcast(true)
+            .map_err(|err| format!("{}", err))
     }
-
 }
 
 fn get_socket(socket_addr: SocketAddr) -> Result<UdpSocket, String> {
@@ -171,7 +172,6 @@ impl KeepAlivePacket {
 
 impl Decoder<KeepAlivePacket> for KeepAlivePacket {
     fn decode(input: &[u8]) -> IResult<&[u8], KeepAlivePacket> {
-
         let (input, _magic) = UdpMagic::decode(input)?;
         let (input, kind) = KeepAlivePacketType::decode(input)?;
         let (input, _padding) = take(1u8)(input)?;
@@ -182,14 +182,17 @@ impl Decoder<KeepAlivePacket> for KeepAlivePacket {
         let (input, subkind) = KeepAlivePacketSubType::decode(input)?;
         let (input, content) = kind.decode_content(input)?;
 
-        Ok((input, KeepAlivePacket {
-            kind,
-            subkind,
-            model,
-            unknown1,
-            device_type,
-            content,
-        }))
+        Ok((
+            input,
+            KeepAlivePacket {
+                kind,
+                subkind,
+                model,
+                unknown1,
+                device_type,
+                content,
+            },
+        ))
     }
 }
 
@@ -277,7 +280,7 @@ impl Decoder<KeepAlivePacketType> for KeepAlivePacketType {
             0x02 => Ok((input, KeepAlivePacketType::Ip)),
             0x06 => Ok((input, KeepAlivePacketType::Status)),
             0x08 => Ok((input, KeepAlivePacketType::Change)),
-            _    => Err(nom::Err::Error((input, Switch))),
+            _ => Err(nom::Err::Error((input, Switch))),
         }
     }
 }
@@ -286,11 +289,11 @@ impl KeepAlivePacketType {
     fn decode_content<'a>(&self, input: &'a [u8]) -> IResult<&'a [u8], KeepAliveContentType> {
         let (input, decoded_value) = match self {
             Self::Status => Status::decode,
-            Self::Hello  => Hello::decode,
+            Self::Hello => Hello::decode,
             Self::Change => Change::decode,
             Self::Number => Number::decode,
-            Self::Mac    => Mac::decode,
-            Self::Ip     => Ip::decode,
+            Self::Mac => Mac::decode,
+            Self::Ip => Ip::decode,
         }(input)?;
 
         Ok((input, decoded_value))
@@ -334,7 +337,7 @@ impl Decoder<KeepAliveContentType> for Mac {
                 iteration,
                 unknown2,
                 mac_addr,
-            })
+            }),
         ))
     }
 }
@@ -345,7 +348,7 @@ impl From<Mac> for Bytes {
 
         buf.put_u8(value.iteration);
         buf.put_u8(value.unknown2);
-        buf.put(mac_addr_to_bytes(value.mac_addr));
+        buf.extend_from_slice(&value.mac_addr.octets());
 
         buf.freeze()
     }
@@ -425,7 +428,7 @@ impl Decoder<KeepAliveContentType> for Ip {
                 iteration,
                 index,
                 player_number_assignment,
-            })
+            }),
         ))
     }
 }
@@ -434,7 +437,7 @@ impl From<Ip> for Bytes {
     fn from(ip: Ip) -> Bytes {
         let mut buf = BytesMut::with_capacity(16);
         buf.put(ip_addr_to_bytes(ip.ip_addr));
-        buf.put(mac_addr_to_bytes(ip.mac_addr));
+        buf.extend_from_slice(&ip.mac_addr.octets());
         buf.put_u8(ip.map_sequence_byte());
         buf.put_u8(ip.iteration);
         buf.put_u8(4u8);
@@ -455,10 +458,13 @@ impl Decoder<KeepAliveContentType> for Change {
         let (input, old_player_number) = be_u8(input)?;
         let (input, ip_addr) = Ipv4Addr::decode(input)?;
 
-        Ok((input, KeepAliveContentType::Change(Change {
-            old_player_number,
-            ip_addr,
-        })))
+        Ok((
+            input,
+            KeepAliveContentType::Change(Change {
+                old_player_number,
+                ip_addr,
+            }),
+        ))
     }
 }
 
@@ -489,17 +495,14 @@ impl Decoder<KeepAliveContentType> for Number {
             KeepAliveContentType::Number(Number {
                 proposed_player_number,
                 iteration,
-            })
+            }),
         ))
     }
 }
 
 impl From<Number> for Bytes {
     fn from(value: Number) -> Bytes {
-        Bytes::from(vec![
-            value.proposed_player_number,
-            value.iteration,
-        ])
+        Bytes::from(vec![value.proposed_player_number, value.iteration])
     }
 }
 
@@ -512,9 +515,7 @@ impl Decoder<KeepAliveContentType> for Hello {
     fn decode(input: &[u8]) -> IResult<&[u8], KeepAliveContentType> {
         let (input, unknown2) = be_u8(input)?;
 
-        Ok((input, KeepAliveContentType::Hello(Hello {
-            unknown2,
-        })))
+        Ok((input, KeepAliveContentType::Hello(Hello { unknown2 })))
     }
 }
 
@@ -556,15 +557,18 @@ impl Decoder<KeepAliveContentType> for Status {
         let (input, unknown3) = be_u16(input)?;
         let (input, unknown4) = be_u8(input)?;
 
-        Ok((input, KeepAliveContentType::Status(Status {
-            player_number,
-            unknown2,
-            mac_addr,
-            ip_addr,
-            device_count,
-            unknown3,
-            unknown4,
-        })))
+        Ok((
+            input,
+            KeepAliveContentType::Status(Status {
+                player_number,
+                unknown2,
+                mac_addr,
+                ip_addr,
+                device_count,
+                unknown3,
+                unknown4,
+            }),
+        ))
     }
 }
 
@@ -573,7 +577,7 @@ impl From<Status> for Bytes {
         let mut buf = BytesMut::with_capacity(15);
         buf.put_u8(value.player_number);
         buf.put_u8(value.unknown2);
-        buf.put(mac_addr_to_bytes(value.mac_addr));
+        buf.extend_from_slice(&value.mac_addr.octets());
         buf.put(ip_addr_to_bytes(value.ip_addr));
         buf.put_u8(value.device_count);
         buf.put_u8(1u8);
@@ -591,21 +595,10 @@ trait Decoder<T> {
 
 impl Decoder<MacAddr> for MacAddr {
     fn decode(input: &[u8]) -> IResult<&[u8], MacAddr> {
-        let (input, (a, b, c, d, e, f)) = tuple((
-            be_u8,
-            be_u8,
-            be_u8,
-            be_u8,
-            be_u8,
-            be_u8,
-        ))(input)?;
+        let (input, (a, b, c, d, e, f)) = tuple((be_u8, be_u8, be_u8, be_u8, be_u8, be_u8))(input)?;
 
         Ok((input, MacAddr::new(a, b, c, d, e, f)))
     }
-}
-
-fn mac_addr_to_bytes(mac_addr: MacAddr) -> Bytes {
-    Bytes::from(<[u8; 6]>::from(mac_addr).to_vec())
 }
 
 fn ip_addr_to_bytes(ip_addr: Ipv4Addr) -> Bytes {
@@ -636,16 +629,19 @@ impl Decoder<KeepAlivePacketSubType> for KeepAlivePacketSubType {
     fn decode(input: &[u8]) -> IResult<&[u8], KeepAlivePacketSubType> {
         let (input, kind) = take(1u8)(input)?;
 
-        Ok((input, match kind[0] {
-            0x25 => Self::Hello,
-            0x26 => Self::Number,
-            0x2c => Self::Mac,
-            0x32 => Self::Ip,
-            0x36 => Self::Status,
-            0x29 => Self::Change,
-            0x00 => Self::StatusMixer,
-            _    => Self::Unknown(kind[0]),
-        }))
+        Ok((
+            input,
+            match kind[0] {
+                0x25 => Self::Hello,
+                0x26 => Self::Number,
+                0x2c => Self::Mac,
+                0x32 => Self::Ip,
+                0x36 => Self::Status,
+                0x29 => Self::Change,
+                0x00 => Self::StatusMixer,
+                _ => Self::Unknown(kind[0]),
+            },
+        ))
     }
 }
 
@@ -689,10 +685,9 @@ impl From<KeepAliveContentType> for Bytes {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use super::super::super::utils::network::PioneerNetwork;
-    use ipnetwork::{Ipv4Network};
-    use pnet::datalink::{MacAddr};
+    use super::*;
+    use pnet::{datalink::MacAddr, ipnetwork::Ipv4Network};
     use pretty_assertions::assert_eq;
 
     fn get_pioneer_network() -> PioneerNetwork {
@@ -700,51 +695,45 @@ mod test {
         let cidr = 24;
         let network = Ipv4Network::new(addr, cidr).unwrap();
 
-        PioneerNetwork::new(
-            network,
-            MacAddr::new(0xff, 0xff, 0xff, 0xff, 0xff, 0xff),
-        )
+        PioneerNetwork::new(network, MacAddr::new(0xff, 0xff, 0xff, 0xff, 0xff, 0xff))
     }
 
     #[test]
     fn test_mac_iteration() {
         let discovery_sequence_1 = Bytes::from(vec![
-            0x51,0x73,0x70,0x74,0x31,0x57,
-            0x6d,0x4a,0x4f,0x4c,0x00,0x00,0x72,0x65,0x6b,0x6f,0x72,0x64,0x62,0x6f,0x78,0x00,
-            0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x03,0x00,0x2c,0x01,0x04,
-            0xac,0x87,0xa3,0x35,0xbc,0x4d,
+            0x51, 0x73, 0x70, 0x74, 0x31, 0x57, 0x6d, 0x4a, 0x4f, 0x4c, 0x00, 0x00, 0x72, 0x65,
+            0x6b, 0x6f, 0x72, 0x64, 0x62, 0x6f, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x00, 0x2c, 0x01, 0x04, 0xac, 0x87, 0xa3, 0x35,
+            0xbc, 0x4d,
         ]);
 
-        assert_eq!(discovery_sequence_1, Bytes::from(
-            KeepAlivePacket {
+        assert_eq!(
+            discovery_sequence_1,
+            Bytes::from(KeepAlivePacket {
                 kind: KeepAlivePacketType::Mac,
                 subkind: KeepAlivePacketSubType::Mac,
                 model: ModelName::new("rekordbox".to_string()),
                 unknown1: 1,
                 device_type: DeviceType::Rekordbox,
-                content: KeepAliveContentType::Mac(
-                    Mac {
-                        iteration: 1,
-                        unknown2: 4,
-                        mac_addr: MacAddr::from([0xac, 0x87, 0xa3, 0x35, 0xbc, 0x4d]),
-                    },
-                ),
-            }
-        ));
+                content: KeepAliveContentType::Mac(Mac {
+                    iteration: 1,
+                    unknown2: 4,
+                    mac_addr: MacAddr::from([0xac, 0x87, 0xa3, 0x35, 0xbc, 0x4d]),
+                },),
+            })
+        );
     }
 
     #[test]
     fn test_keepalive_status_packet() {
-        assert_eq!(Bytes::from(KeepAlivePacket {
-            kind: KeepAlivePacketType::Status,
-            subkind: KeepAlivePacketSubType::Status,
-            model: ModelName::new(
-                "Linux".to_string(),
-            ),
-            unknown1: 1,
-            device_type: DeviceType::Rekordbox,
-            content: KeepAliveContentType::Status(
-                Status {
+        assert_eq!(
+            Bytes::from(KeepAlivePacket {
+                kind: KeepAlivePacketType::Status,
+                subkind: KeepAlivePacketSubType::Status,
+                model: ModelName::new("Linux".to_string(),),
+                unknown1: 1,
+                device_type: DeviceType::Rekordbox,
+                content: KeepAliveContentType::Status(Status {
                     player_number: 17,
                     unknown2: 1,
                     ip_addr: Ipv4Addr::new(192, 168, 10, 50),
@@ -752,38 +741,35 @@ mod test {
                     device_count: 1,
                     unknown3: 4,
                     unknown4: 1,
-                },
-            ),
-        }).len(), 54);
+                },),
+            })
+            .len(),
+            54
+        );
     }
 
     #[test]
     fn test_decode_keepalive_ip_package() {
         let payload: [u8; 50] = [
-            81, 115, 112, 116, 49, 87, 109, 74, 79, 76, 2, 0, 114, 101,
-            107, 111, 114, 100, 98, 111, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 1, 3, 0, 50, 192, 168, 10, 47, 156, 182, 208, 238, 255,
-            9, 44, 6, 4, 1,
+            81, 115, 112, 116, 49, 87, 109, 74, 79, 76, 2, 0, 114, 101, 107, 111, 114, 100, 98,
+            111, 120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 0, 50, 192, 168, 10, 47, 156, 182,
+            208, 238, 255, 9, 44, 6, 4, 1,
         ];
 
         assert_eq!(
             KeepAlivePacket {
                 kind: KeepAlivePacketType::Ip,
                 subkind: KeepAlivePacketSubType::Ip,
-                model: ModelName::new(
-                    "rekordbox".to_string(),
-                ),
+                model: ModelName::new("rekordbox".to_string(),),
                 unknown1: 1,
                 device_type: DeviceType::Rekordbox,
-                content: KeepAliveContentType::Ip(
-                    Ip {
-                        ip_addr: Ipv4Addr::new(192, 168, 10, 47),
-                        mac_addr: MacAddr::from([0x9c, 0xb6, 0xd0, 0xee, 0xff, 0x09]),
-                        iteration: 44,
-                        index: 6,
-                        player_number_assignment: PlayerNumberAssignment::Auto,
-                    },
-                ),
+                content: KeepAliveContentType::Ip(Ip {
+                    ip_addr: Ipv4Addr::new(192, 168, 10, 47),
+                    mac_addr: MacAddr::from([0x9c, 0xb6, 0xd0, 0xee, 0xff, 0x09]),
+                    iteration: 44,
+                    index: 6,
+                    player_number_assignment: PlayerNumberAssignment::Auto,
+                },),
             },
             KeepAlivePacket::decode(&payload).unwrap().1,
         );
