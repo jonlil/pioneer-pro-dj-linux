@@ -5,6 +5,7 @@ use tokio::net::TcpListener;
 use tokio::stream::StreamExt;
 use tokio_util::codec::{Framed, BytesCodec};
 use futures::SinkExt;
+use crate::utils::parse_error;
 
 use super::packets::{DBMessage, ManyDBMessages, Arguments};
 use super::db_field::{DBField, DBFieldType};
@@ -698,7 +699,7 @@ fn process(
                 ).into();
             }
         },
-        Err(nom::Err::Error((bytes, _))) => eprintln!("Error: {:?}", bytes),
+        Err(nom::Err::Error(bytes)) => eprintln!("Error: {:?}", bytes),
         _ => eprintln!("Not covered: {:?}", bytes),
     }
 

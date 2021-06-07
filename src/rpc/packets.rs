@@ -1,13 +1,17 @@
 use nom::number::complete::{be_u32, be_u16, le_u16, be_u8};
 use nom::multi::count;
 use nom::IResult;
-use nom::error::ErrorKind::{Switch, MapRes};
+use nom::error::{
+    ErrorKind::{Switch, MapRes},
+};
 use bytes::{BytesMut, Bytes, BufMut};
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use std::fs::Metadata;
 use std::os::unix::fs::MetadataExt;
+
+use crate::utils::parse_error;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -97,7 +101,7 @@ impl Decoder for RpcAuth {
         match flavor {
             0u32 => Ok((input, RpcAuth::Null)),
             1u32 => Ok((input, RpcAuth::Unix)),
-            _ => Err(nom::Err::Error((input, Switch)))
+            _ => Err(parse_error(input, Switch))
         }
     }
 }
@@ -590,7 +594,7 @@ impl Decoder for RpcMessageType {
                 let (input, rpc_reply) = RpcReply::decode(input)?;
                 Ok((input, RpcMessageType::Reply(rpc_reply)))
             },
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(parse_error(input, Switch)),
         }
     }
 }
@@ -629,7 +633,7 @@ impl Decoder for RpcProgram {
             100000u32 => Ok((input, (RpcProgram::Portmap, program_version))),
             100003u32 => Ok((input, (RpcProgram::Nfs, program_version))),
             100005u32 => Ok((input, (RpcProgram::Mount, program_version))),
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(nom::Err::Failure(nom::error::Error::new(input, Switch))),
         }
     }
 }
@@ -656,7 +660,7 @@ impl Decoder for PortmapProcedure {
             3u32 => Ok((input, PortmapProcedure::Getport)),
             4u32 => Ok((input, PortmapProcedure::Dump)),
             5u32 => Ok((input, PortmapProcedure::CallResult)),
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(parse_error(input, Switch)),
         }
     }
 }
@@ -690,7 +694,7 @@ impl RpcProcedure {
             },
             (RpcProgram::Portmap, 4u32) => Ok((input, RpcProcedure::PortmapDump)),
             (RpcProgram::Portmap, 5u32) => Ok((input, RpcProcedure::PortmapCallResult)),
-            (RpcProgram::Portmap, _)    => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Portmap, _)    => Err(parse_error(input, Switch)),
             (RpcProgram::Nfs, 1) => {
                 let (input, data) = NfsGetAttr::decode(input)?;
                 Ok((input, RpcProcedure::NfsGetAttr(data)))
@@ -703,13 +707,13 @@ impl RpcProcedure {
                 let (input, data) = NfsRead::decode(&input)?;
                 Ok((input, RpcProcedure::NfsRead(data)))
             }
-            (RpcProgram::Nfs, _)        => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Nfs, _)        => Err(parse_error(input, Switch)),
             (RpcProgram::Mount, 5u32)   => Ok((input, RpcProcedure::MountExport)),
             (RpcProgram::Mount, 1u32)   => {
                 let (input, data) = MountMnt::decode(&input)?;
                 Ok((input, RpcProcedure::MountMnt(data)))
             },
-            (RpcProgram::Mount, _)      => Err(nom::Err::Error((input, Switch))),
+            (RpcProgram::Mount, _)      => Err(parse_error(input, Switch)),
         }
     }
 }
@@ -736,7 +740,7 @@ impl Decoder for MountMnt {
                 }))
             },
             // TODO: change this ErrorTag to something relevant.
-            Err(_err) => Err(nom::Err::Error((input, Switch))),
+            Err(_err) => Err(parse_error(input, Switch)),
         }
     }
 }
@@ -887,7 +891,7 @@ impl Decoder for NfsLookup {
         let (input, contents) = count(le_u16, length as usize / 2)(input)?;
 
         let contents = String::from_utf16(&contents)
-            .map_err(|_| nom::Err::Error((input, MapRes)))?;
+            .map_err(|_| parse_error(input, MapRes))?;
 
         Ok((input, NfsLookup {
             filename: Path::new(&contents).to_path_buf(),
@@ -941,7 +945,7 @@ impl Decoder for PortmapProtocol {
 
         match protocol {
             17u32 => Ok((input, PortmapProtocol::Udp)),
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(parse_error(input, Switch)),
         }
     }
 }
@@ -992,7 +996,7 @@ impl Decoder for NfsProcedure {
             15 => { Ok((input, NfsProcedure::Rmdir)) },
             16 => { Ok((input, NfsProcedure::Readdir)) },
             17 => { Ok((input, NfsProcedure::Statfs)) },
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(parse_error(input,Switch)),
         }
     }
 }

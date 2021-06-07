@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 
+use crate::utils::parse_error;
 use nom::bytes::complete::{tag, take};
 use nom::number::complete::{be_u64, be_u32, be_u16, be_u8};
 use nom::{IResult, multi::count};
@@ -228,7 +229,7 @@ impl ModelName {
 
         match String::from_utf8(model.to_vec()) {
             Ok(model) => Ok((input, ModelName(model.trim_end_matches('\u{0}').to_string()))),
-            Err(_err) => Err(nom::Err::Error((input, nom::error::ErrorKind::Tag))),
+            Err(_err) => Err(parse_error(input, nom::error::ErrorKind::Tag)),
         }
     }
 
@@ -473,7 +474,7 @@ impl Utf16FixedString {
 
         let value = match String::from_utf16(&value) {
             Ok(val)  => val,
-            Err(_err) => return Err(nom::Err::Error((input, nom::error::ErrorKind::Tag))),
+            Err(_err) => return Err(parse_error(input, nom::error::ErrorKind::Tag)),
         };
 
         Ok((input, Utf16FixedString {
@@ -810,7 +811,7 @@ mod test {
     #[test]
     fn parse_test_library_handler() {
         assert_eq!(
-            Err(nom::Err::Error((&[0, 0, 0, 1][..], nom::error::ErrorKind::Tag))),
+            Err(parse_error(&[0, 0, 0, 1][..], nom::error::ErrorKind::Tag)),
             DBMessage::parse(b"\x11\x00\x00\x00\x01"),
         );
     }
@@ -837,7 +838,7 @@ mod test {
 
         // First byte is consumed so skip that when asserting
         assert_eq!(
-            Err(nom::Err::Error((&message[1..], nom::error::ErrorKind::Tag))),
+            Err(parse_error(&message[1..], nom::error::ErrorKind::Tag)),
             DBMessage::parse(&message),
         );
     }
