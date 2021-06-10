@@ -13,6 +13,7 @@ use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::thread;
 use std::time::Duration;
+use crate::utils::parse_error;
 
 pub struct KeepAliveMacPackage;
 impl KeepAliveMacPackage {
@@ -240,7 +241,7 @@ impl Decoder<DeviceType> for DeviceType {
             1 => Ok((input, DeviceType::Djm)),
             2 => Ok((input, DeviceType::Cdj)),
             3 => Ok((input, DeviceType::Rekordbox)),
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(parse_error(input, Switch)),
         }
     }
 }
@@ -280,7 +281,7 @@ impl Decoder<KeepAlivePacketType> for KeepAlivePacketType {
             0x02 => Ok((input, KeepAlivePacketType::Ip)),
             0x06 => Ok((input, KeepAlivePacketType::Status)),
             0x08 => Ok((input, KeepAlivePacketType::Change)),
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(parse_error(input, Switch)),
         }
     }
 }
@@ -366,7 +367,7 @@ impl Decoder<PlayerNumberAssignment> for PlayerNumberAssignment {
         match assignment {
             1 => Ok((input, PlayerNumberAssignment::Auto)),
             2 => Ok((input, PlayerNumberAssignment::Manual)),
-            _ => Err(nom::Err::Error((input, Switch))),
+            _ => Err(parse_error(input, Switch)),
         }
     }
 }
