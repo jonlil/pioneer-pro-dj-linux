@@ -1,15 +1,19 @@
-use bytes::{Bytes, BytesMut};
-use tokio_util::codec::{Encoder, Decoder};
-use crate::rekordbox::packets::{DBMessage};
-use std::io::{Error, ErrorKind};
+use crate::rekordbox::packets::DBMessage;
+use bytes::Bytes;
 use std::convert::TryFrom;
+use std::io::{Error, ErrorKind};
+use tokio_util::codec::{Decoder, Encoder};
+
+use bytes::BytesMut;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DbBytesCodec(());
 
 impl DbBytesCodec {
     /// Creates a new `RpcBytesCodec` for shipping `RpcMessage` back and forth
-    pub fn new() -> DbBytesCodec { DbBytesCodec(()) }
+    pub fn new() -> DbBytesCodec {
+        DbBytesCodec(())
+    }
 }
 
 impl Decoder for DbBytesCodec {
