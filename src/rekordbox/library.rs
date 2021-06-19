@@ -1,4 +1,3 @@
-use crate::utils::parse_error;
 use bytes::{Bytes, BytesMut};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -11,6 +10,7 @@ use super::db_request_type::DBRequestType;
 use super::packets::{Arguments, DBMessage, ManyDBMessages};
 use crate::rekordbox::{Database, Record, ServerState};
 use crate::utils::network::random_ipv4_socket_address;
+use futures::{SinkExt, StreamExt};
 
 mod codec;
 pub mod database;
