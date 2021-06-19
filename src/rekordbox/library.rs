@@ -1,31 +1,29 @@
+use crate::utils::parse_error;
 use bytes::{Bytes, BytesMut};
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
-use tokio::stream::StreamExt;
-use tokio_util::codec::{Framed, BytesCodec};
-use futures::SinkExt;
-use crate::utils::parse_error;
+use tokio_util::codec::{BytesCodec, Framed};
 
-use super::packets::{DBMessage, ManyDBMessages, Arguments};
 use super::db_field::{DBField, DBFieldType};
-use super::db_request_type::DBRequestType;
 use super::db_message_argument::ArgumentCollection;
-use crate::rekordbox::{Database, ServerState, Record};
+use super::db_request_type::DBRequestType;
+use super::packets::{Arguments, DBMessage, ManyDBMessages};
+use crate::rekordbox::{Database, Record, ServerState};
 use crate::utils::network::random_ipv4_socket_address;
 
 mod codec;
-mod request;
+pub mod database;
 mod fixtures;
 mod helper;
-pub mod model;
-pub mod database;
 pub mod metadata_type;
+pub mod model;
+mod request;
 
-pub use metadata_type::*;
-use request::{Controller, RequestWrapper, RequestHandler};
 use fixtures::PREVIEW_WAVEFORM_RESPONSE;
 use helper::*;
+pub use metadata_type::*;
+use request::{Controller, RequestHandler, RequestWrapper};
 
 pub struct ClientState {
     previous_request: Option<StatefulRequest>,
@@ -77,12 +75,10 @@ impl Controller for RootMenuController {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
-        bytes.extend(Bytes::from(
-            ArgumentCollection::new(vec![
-                DBField::from([0x00, 0x00, 0x10, 0x00]),
-                DBField::from([0x00, 0x00, 0x00, 0x08]),
-            ]),
-        ));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0x00, 0x00, 0x10, 0x00]),
+            DBField::from([0x00, 0x00, 0x00, 0x08]),
+        ])));
 
         Bytes::from(bytes)
     }
@@ -96,16 +92,12 @@ impl Controller for AlbumByArtistController {
 
         let mut bytes: BytesMut = request.to_response();
         bytes.extend(ok_request());
-        bytes.extend(Bytes::from(
-            ArgumentCollection::new(vec![
-                DBField::from([0u8, 0u8, request_type[0], request_type[1]]),
-                DBField::from(number_of_tracks_by_artist(artist_id, &context.database)),
-            ]),
-        ));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0u8, 0u8, request_type[0], request_type[1]]),
+            DBField::from(number_of_tracks_by_artist(artist_id, &context.database)),
+        ])));
 
-        context.set_previous_request(StatefulRequest::AlbumByArtistRequest {
-            artist_id,
-        });
+        context.set_previous_request(StatefulRequest::AlbumByArtistRequest { artist_id });
 
         Bytes::from(bytes)
     }
@@ -118,12 +110,10 @@ impl Controller for ArtistController {
         let mut bytes: BytesMut = request.to_response();
 
         bytes.extend(ok_request());
-        bytes.extend(Bytes::from(
-            ArgumentCollection::new(vec![
-                DBField::from([0u8, 0u8, request_type[0], request_type[1]]),
-                DBField::from(number_of_artists(&context.database)),
-            ]),
-        ));
+        bytes.extend(Bytes::from(ArgumentCollection::new(vec![
+            DBField::from([0u8, 0u8, request_type[0], request_type[1]]),
+            DBField::from(number_of_artists(&context.database)),
+        ])));
 
         Bytes::from(bytes)
     }
@@ -177,7 +167,7 @@ fn build_message_item(
             value1: value1,
             _type: entry_type,
             ..Default::default()
-        }
+        },
     )
 }
 
@@ -185,10 +175,7 @@ fn build_message_footer(transaction_id: &DBField) -> DBMessage {
     DBMessage::new(
         transaction_id.clone(),
         DBRequestType::MenuFooter,
-        ArgumentCollection::new(vec![
-            DBField::from(1u32),
-            DBField::from(1u32),
-        ]),
+        ArgumentCollection::new(vec![DBField::from(1u32), DBField::from(1u32)]),
     )
 }
 
@@ -196,24 +183,27 @@ struct RenderController;
 impl RenderController {
     fn render_root_menu(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id.clone();
-        let mut response = ManyDBMessages::new(vec![
-            build_message_header(&transaction_id),
-        ]);
+        let mut response = ManyDBMessages::new(vec![build_message_header(&transaction_id)]);
 
-        response.extend(vec![
-            // MenuName, MetadataType, MenuId
-            ("\u{fffa}ARTIST\u{fffb}", metadata_type::ROOT_ARTIST,      0x02),
-            ("\u{fffa}ALBUM\u{fffb}", metadata_type::ROOT_ALBUM,        0x03),
-            ("\u{fffa}TRACK\u{fffb}", metadata_type::ROOT_TRACK,        0x04),
-            ("\u{fffa}KEY\u{fffb}", metadata_type::ROOT_KEY,            0x0c),
-            ("\u{fffa}PLAYLIST\u{fffb}", metadata_type::ROOT_PLAYLIST,  0x05),
-            ("\u{fffa}HISTORY\u{fffb}", metadata_type::ROOT_HISTORY,    0x16),
-            ("\u{fffa}SEARCH\u{fffb}", metadata_type::ROOT_SEARCH,      0x12),
-        ].iter().map(|item| build_message_item(&transaction_id,
-            item.0,
-            item.1,
-            item.2,
-        )).collect());
+        response.extend(
+            vec![
+                // MenuName, MetadataType, MenuId
+                ("\u{fffa}ARTIST\u{fffb}", metadata_type::ROOT_ARTIST, 0x02),
+                ("\u{fffa}ALBUM\u{fffb}", metadata_type::ROOT_ALBUM, 0x03),
+                ("\u{fffa}TRACK\u{fffb}", metadata_type::ROOT_TRACK, 0x04),
+                ("\u{fffa}KEY\u{fffb}", metadata_type::ROOT_KEY, 0x0c),
+                (
+                    "\u{fffa}PLAYLIST\u{fffb}",
+                    metadata_type::ROOT_PLAYLIST,
+                    0x05,
+                ),
+                ("\u{fffa}HISTORY\u{fffb}", metadata_type::ROOT_HISTORY, 0x16),
+                ("\u{fffa}SEARCH\u{fffb}", metadata_type::ROOT_SEARCH, 0x12),
+            ]
+            .iter()
+            .map(|item| build_message_item(&transaction_id, item.0, item.1, item.2))
+            .collect(),
+        );
         response.push(build_message_footer(&transaction_id));
 
         response
@@ -221,12 +211,11 @@ impl RenderController {
 
     fn render_artist_page(&self, request: RequestWrapper, context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
-        let mut response = ManyDBMessages::new(vec![
-            build_message_header(&transaction_id),
-        ]);
+        let mut response = ManyDBMessages::new(vec![build_message_header(&transaction_id)]);
 
         for artist in context.database.artists() {
-            response.push(build_message_item(&transaction_id,
+            response.push(build_message_item(
+                &transaction_id,
                 artist.name().as_str(),
                 metadata_type::ARTIST,
                 *artist.id(),
@@ -245,10 +234,9 @@ impl RenderController {
     fn render_title_page(&self, request: RequestWrapper, _context: &ClientState) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
 
-        let mut response = ManyDBMessages::new(vec![
-            build_message_header(&transaction_id),
-        ]);
-        response.push(build_message_item(&transaction_id,
+        let mut response = ManyDBMessages::new(vec![build_message_header(&transaction_id)]);
+        response.push(build_message_item(
+            &transaction_id,
             "Loopmasters",
             metadata_type::TITLE,
             0x05,
@@ -262,13 +250,17 @@ impl RenderController {
         response
     }
 
-    fn render_album_by_artist(&self, request: RequestWrapper, _context: &ClientState, _artist_id: u32) -> ManyDBMessages {
+    fn render_album_by_artist(
+        &self,
+        request: RequestWrapper,
+        _context: &ClientState,
+        _artist_id: u32,
+    ) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
-        let mut response = ManyDBMessages::new(vec![
-            build_message_header(&transaction_id),
-        ]);
+        let mut response = ManyDBMessages::new(vec![build_message_header(&transaction_id)]);
 
-        response.push(build_message_item(&transaction_id,
+        response.push(build_message_item(
+            &transaction_id,
             "Unknown",
             metadata_type::ALBUM,
             0x00,
@@ -292,9 +284,7 @@ impl RenderController {
         let transaction_id = request.message.transaction_id;
         let tracks = context.database.title_by_artist(artist_id);
 
-        let mut response = ManyDBMessages::new(vec![
-            build_message_header(&transaction_id),
-        ]);
+        let mut response = ManyDBMessages::new(vec![build_message_header(&transaction_id)]);
 
         for track in tracks {
             response.push(build_message_item(
@@ -427,12 +417,15 @@ impl RenderController {
         ])
     }
 
-    fn render_mount_info(&self, request: RequestWrapper, context: &ClientState, track_id: u32) -> ManyDBMessages {
+    fn render_mount_info(
+        &self,
+        request: RequestWrapper,
+        context: &ClientState,
+        track_id: u32,
+    ) -> ManyDBMessages {
         let transaction_id = request.message.transaction_id;
 
-        let mut resp = ManyDBMessages::new(vec![
-            build_message_header(&transaction_id),
-        ]);
+        let mut resp = ManyDBMessages::new(vec![build_message_header(&transaction_id)]);
 
         match context.database.get_track(track_id) {
             Some(track) => {
@@ -493,7 +486,7 @@ impl RenderController {
                         ..Default::default()
                     },
                 ));
-            },
+            }
             None => panic!("Should not happen"),
         };
 
@@ -514,9 +507,7 @@ impl Controller for QueryMountInfoController {
         let items_to_render: u32 = 6u32;
         let track_id = dbfield_to_u32(&request.message.arguments[1]);
 
-        context.set_previous_request(StatefulRequest::MountInfoRequest {
-            track_id,
-        });
+        context.set_previous_request(StatefulRequest::MountInfoRequest { track_id });
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
@@ -550,9 +541,7 @@ impl Controller for TitleByArtistAlbumController {
         let request_type_value = request.message.request_type.value();
         let number_of_tracks_by_artist = number_of_tracks_by_artist(artist_id, &context.database);
 
-        context.set_previous_request(StatefulRequest::TitleByArtistAlbumRequest {
-            artist_id,
-        });
+        context.set_previous_request(StatefulRequest::TitleByArtistAlbumRequest { artist_id });
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
@@ -560,7 +549,7 @@ impl Controller for TitleByArtistAlbumController {
             ArgumentCollection::new(vec![
                 DBField::from([0x00, 0x00, request_type_value[0], request_type_value[1]]),
                 DBField::from(number_of_tracks_by_artist),
-            ])
+            ]),
         ))
     }
 }
@@ -571,9 +560,7 @@ impl Controller for MetadataController {
         let request_type_value = request.message.request_type.value();
         let track_id = dbfield_to_u32(&request.message.arguments[1]);
 
-        context.set_previous_request(StatefulRequest::MetadataRequest {
-            track_id,
-        });
+        context.set_previous_request(StatefulRequest::MetadataRequest { track_id });
 
         Bytes::from(DBMessage::new(
             request.message.transaction_id,
@@ -622,10 +609,18 @@ impl Controller for RenderController {
             Some(StatefulRequest::RootMenuRequest) => self.render_root_menu(request, context),
             Some(StatefulRequest::ArtistRequest) => self.render_artist_page(request, context),
             Some(StatefulRequest::TitleRequest) => self.render_title_page(request, context),
-            Some(StatefulRequest::AlbumByArtistRequest { artist_id }) => self.render_album_by_artist(request, context, artist_id),
-            Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id }) => self.render_title_by_artist_album(request, context, artist_id),
-            Some(StatefulRequest::MetadataRequest { track_id }) => self.render_metadata(request, context, track_id),
-            Some(StatefulRequest::MountInfoRequest { track_id }) => self.render_mount_info(request, context, track_id),
+            Some(StatefulRequest::AlbumByArtistRequest { artist_id }) => {
+                self.render_album_by_artist(request, context, artist_id)
+            }
+            Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id }) => {
+                self.render_title_by_artist_album(request, context, artist_id)
+            }
+            Some(StatefulRequest::MetadataRequest { track_id }) => {
+                self.render_metadata(request, context, track_id)
+            }
+            Some(StatefulRequest::MountInfoRequest { track_id }) => {
+                self.render_mount_info(request, context, track_id)
+            }
             _ => ManyDBMessages::new(vec![]),
         })
     }
@@ -654,22 +649,22 @@ fn get_controller(request_type: &DBRequestType) -> Option<Box<dyn Controller>> {
 /// for executing a future client request.
 fn handle_sequence_requests(context: &mut ClientState, request_type: &DBRequestType) {
     match request_type {
-        DBRequestType::AlbumByArtistRequest => {},
-        DBRequestType::TitleByArtistAlbumRequest => {},
-        DBRequestType::ArtistRequest => context.set_previous_request(StatefulRequest::ArtistRequest),
+        DBRequestType::AlbumByArtistRequest => {}
+        DBRequestType::TitleByArtistAlbumRequest => {}
+        DBRequestType::ArtistRequest => {
+            context.set_previous_request(StatefulRequest::ArtistRequest)
+        }
         DBRequestType::TitleRequest => context.set_previous_request(StatefulRequest::TitleRequest),
-        DBRequestType::RootMenuRequest => context.set_previous_request(StatefulRequest::RootMenuRequest),
-        DBRequestType::MetadataRequest => {},
-        DBRequestType::MountInfoRequest => {},
-        _ => {},
+        DBRequestType::RootMenuRequest => {
+            context.set_previous_request(StatefulRequest::RootMenuRequest)
+        }
+        DBRequestType::MetadataRequest => {}
+        DBRequestType::MountInfoRequest => {}
+        _ => {}
     };
 }
 
-fn process(
-    bytes: Bytes,
-    context: &mut ClientState,
-    _peer: &SocketAddr,
-) -> Bytes {
+fn process(bytes: Bytes, context: &mut ClientState, _peer: &SocketAddr) -> Bytes {
     // TODO: Before implementing DbBytesCodec this must be migrated.
     if bytes.len() == 5 {
         return Bytes::from(bytes);
@@ -680,25 +675,21 @@ fn process(
             if let Some(request_handler) = get_controller(&message.request_type) {
                 handle_sequence_requests(context, &message.request_type);
 
-                return RequestHandler::new(
-                    request_handler,
-                    message,
-                    context,
-                ).respond_to()
+                return RequestHandler::new(request_handler, message, context).respond_to();
             } else {
                 eprintln!(
                     "DBRequestType: {:?} has no controller implemented.\nRaw bytes: {:?}",
-                    &message.request_type,
-                    bytes
+                    &message.request_type, bytes
                 );
 
                 return DBMessage::new(
                     message.transaction_id,
                     DBRequestType::Success,
                     ArgumentCollection::new(vec![]),
-                ).into();
+                )
+                .into();
             }
-        },
+        }
         Err(nom::Err::Error(bytes)) => eprintln!("Error: {:?}", bytes),
         _ => eprintln!("Not covered: {:?}", bytes),
     }
@@ -709,7 +700,7 @@ fn process(
 async fn spawn_library_client_handler(
     mut listener: TcpListener,
     state: &Arc<Mutex<ServerState>>,
-    database: &Arc<Database>
+    database: &Arc<Database>,
 ) {
     match listener.accept().await {
         Ok((remote_client, address)) => {
@@ -719,22 +710,31 @@ async fn spawn_library_client_handler(
             while let Some(result) = remote_client.next().await {
                 match result {
                     Ok(data) => {
-                        match remote_client.send(process(data.freeze(), &mut context, &address)).await {
-                            Ok(_) => {},
-                            Err(err) => eprintln!("failed sending library query response; error = {}", err),
+                        match remote_client
+                            .send(process(data.freeze(), &mut context, &address))
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(err) => {
+                                eprintln!("failed sending library query response; error = {}", err)
+                            }
                         }
-                    },
+                    }
                     Err(err) => eprintln!("library client handler got error; error = {}", err),
                 }
             }
-        },
+        }
         Err(err) => eprintln!("failed reading connection on socket; error = {}", err),
     }
 }
 
 pub struct DBLibraryServer;
 impl DBLibraryServer {
-    async fn spawn(address: &str, state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Result<(), std::io::Error> {
+    async fn spawn(
+        address: &str,
+        state: Arc<Mutex<ServerState>>,
+        database: Arc<Database>,
+    ) -> Result<(), std::io::Error> {
         let addr = address.parse::<SocketAddr>().unwrap();
         let mut listener = TcpListener::bind(&addr).await?;
 
@@ -752,40 +752,53 @@ impl DBLibraryServer {
                                 Ok(_data) => {
                                     let state = state.clone();
                                     let database = database.clone();
-                                    let allocated_socket = TcpListener::bind(&random_ipv4_socket_address()).await.unwrap();
-                                    let allocated_port = allocated_socket.local_addr().unwrap().port();
+                                    let allocated_socket =
+                                        TcpListener::bind(&random_ipv4_socket_address())
+                                            .await
+                                            .unwrap();
+                                    let allocated_port =
+                                        allocated_socket.local_addr().unwrap().port();
 
                                     tokio::spawn(async move {
-                                        spawn_library_client_handler(allocated_socket, &state, &database).await;
+                                        spawn_library_client_handler(
+                                            allocated_socket,
+                                            &state,
+                                            &database,
+                                        )
+                                        .await;
                                     });
-                                    let message = Bytes::from(allocated_port.to_be_bytes().to_vec());
+                                    let message =
+                                        Bytes::from(allocated_port.to_be_bytes().to_vec());
                                     match socket.send(message).await {
                                         Err(err) => eprintln!("failed sending library server port to client; error = {}", err),
                                         _ => {},
                                     }
-                                },
-                                Err(_err) => {},
+                                }
+                                Err(_err) => {}
                             };
                         }
                     });
-                },
+                }
                 Err(err) => eprintln!("error accepting socket: {}", err),
             }
         }
     }
 
-    pub async fn run(state: Arc<Mutex<ServerState>>, database: Arc<Database>) -> Result<(), std::io::Error> {
+    pub async fn run(
+        state: Arc<Mutex<ServerState>>,
+        database: Arc<Database>,
+    ) -> Result<(), std::io::Error> {
         Self::spawn("0.0.0.0:12523", state, database).await
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::net::{Ipv4Addr, IpAddr};
-    use super::*;
     use super::super::fixtures;
-    use pretty_assertions::{assert_eq};
-    use crate::rekordbox::{ServerState, Database};
+    use super::*;
+    use crate::rekordbox::{Database, ServerState};
+    use pretty_assertions::assert_eq;
+    use std::net::{IpAddr, Ipv4Addr};
 
     fn context() -> ClientState {
         ClientState::new(
@@ -814,7 +827,10 @@ mod test {
             &mut context,
         );
 
-        assert_eq!(request_handler.respond_to(), Bytes::from("my-very-test-value"));
+        assert_eq!(
+            request_handler.respond_to(),
+            Bytes::from("my-very-test-value")
+        );
     }
 
     #[test]
@@ -826,7 +842,10 @@ mod test {
             &mut context,
         );
 
-        assert_eq!(request_handler.respond_to(), fixtures::setup_response_packet());
+        assert_eq!(
+            request_handler.respond_to(),
+            fixtures::setup_response_packet()
+        );
     }
 
     #[test]
@@ -864,7 +883,10 @@ mod test {
         let peer_addr = peer();
 
         assert_eq!(dialog.1, process(dialog.0, &mut context, &peer_addr));
-        assert_eq!(Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id: 0u32 }), context.previous_request);
+        assert_eq!(
+            Some(StatefulRequest::TitleByArtistAlbumRequest { artist_id: 0u32 }),
+            context.previous_request
+        );
         assert_eq!(dialog.3, process(dialog.2, &mut context, &peer_addr));
     }
 }

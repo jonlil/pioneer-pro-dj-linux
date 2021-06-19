@@ -1,22 +1,15 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::fs::File;
 use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 
+use futures::{SinkExt, StreamExt};
 use tokio_util::udp::UdpFramed;
-use tokio::stream::StreamExt;
-use futures::{SinkExt};
 
-use crate::rpc::fs::get_fhandle;
-use crate::rpc::packets::{
-    *,
-    self as rpc_packages,
-    NfsLookupReply,
-    NfsFileAttributes,
-    NfsStatus,
-};
 use crate::rpc::codec::RpcBytesCodec;
+use crate::rpc::fs::get_fhandle;
 use crate::rpc::fs::read_file_range;
+use crate::rpc::packets::{self as rpc_packages, NfsFileAttributes, NfsLookupReply, NfsStatus, *};
 
 pub struct RpcNfsProgramHandler {
     path: PathBuf,
@@ -48,7 +41,10 @@ impl RpcNfsProgramHandler {
         self.path = PathBuf::from("/");
     }
 
-    pub fn lookup(&mut self, lookup: &rpc_packages::NfsLookup) -> Result<NfsLookupReply, NfsProcedureError> {
+    pub fn lookup(
+        &mut self,
+        lookup: &rpc_packages::NfsLookup,
+    ) -> Result<NfsLookupReply, NfsProcedureError> {
         let mut temp_path = self.path.clone();
         temp_path.push(lookup.filename());
 
@@ -67,15 +63,18 @@ impl RpcNfsProgramHandler {
                     fhandle: FileHandle::new(fwrapper.encoded),
                     status: NfsStatus::Ok,
                 })
-            },
+            }
             Err(err) => {
                 self.reset_path();
                 Err(err.into())
-            },
+            }
         }
     }
 
-    pub fn getattr(&mut self, arguments: &NfsGetAttr) -> Result<NfsGetAttrReply, NfsProcedureError> {
+    pub fn getattr(
+        &mut self,
+        arguments: &NfsGetAttr,
+    ) -> Result<NfsGetAttrReply, NfsProcedureError> {
         let inode = arguments.fhandle.ino();
         match self.file_handlers.get(&inode) {
             Some(file) => {
@@ -84,7 +83,7 @@ impl RpcNfsProgramHandler {
                     status: NfsStatus::Ok,
                     attributes: NfsFileAttributes::from(metadata),
                 })
-            },
+            }
             None => Err(NfsProcedureError::StaleFileHandle),
         }
     }
@@ -101,7 +100,7 @@ impl RpcNfsProgramHandler {
                     attributes: NfsFileAttributes::from(metadata),
                     data,
                 })
-            },
+            }
             None => Err(NfsProcedureError::StaleFileHandle),
         }
     }
@@ -118,36 +117,33 @@ impl RpcNfsProgramHandler {
     pub async fn run(&mut self, mut socket: UdpFramed<RpcBytesCodec>) {
         while let Some(package) = socket.next().await {
             match package {
-                Ok((rpc_message, address)) => {
-                    match rpc_message.message() {
-                        RpcMessageType::Call(call) => {
-                            match self.call_procedure(&call) {
-                                Ok(rpc_reply) => {
-                                    let package = (
-                                        RpcMessage::new(
-                                            rpc_message.transaction_id(),
-                                            RpcMessageType::Reply(RpcReply {
-                                                verifier: RpcAuth::Null,
-                                                reply_state: RpcReplyState::Accepted,
-                                                accept_state: RpcAcceptState::Success,
-                                                data: rpc_reply,
-                                            }),
-                                        ),
-                                        address,
-                                    );
-                                    socket.send(package).await;
-                                },
-                                Err(err) => {
-                                    eprintln!("{:?}", err);
-                                }
-                            };
-                        },
-                        _ => {},
+                Ok((rpc_message, address)) => match rpc_message.message() {
+                    RpcMessageType::Call(call) => {
+                        match self.call_procedure(&call) {
+                            Ok(rpc_reply) => {
+                                let package = (
+                                    RpcMessage::new(
+                                        rpc_message.transaction_id(),
+                                        RpcMessageType::Reply(RpcReply {
+                                            verifier: RpcAuth::Null,
+                                            reply_state: RpcReplyState::Accepted,
+                                            accept_state: RpcAcceptState::Success,
+                                            data: rpc_reply,
+                                        }),
+                                    ),
+                                    address,
+                                );
+                                socket.send(package).await;
+                            }
+                            Err(err) => {
+                                eprintln!("{:?}", err);
+                            }
+                        };
                     }
+                    _ => {}
                 },
-                Err(_err) => {},
+                Err(_err) => {}
             }
         }
     }
 }
-
