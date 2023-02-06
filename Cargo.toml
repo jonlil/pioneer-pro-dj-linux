@@ -5,7 +5,7 @@ authors = ["Jonas Liljestrand <jonas.liljestrand@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-pnet = "0.28.0"
+pnet = "0.33.0"
 byteorder = "1.3.1"
 tokio = { version = "1.0.3", features = ["full"] }
 tokio-util = { version = "0.6.7", features = ["net", "codec"] }
